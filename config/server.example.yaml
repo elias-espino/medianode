@@ -1,0 +1,68 @@
+# Copia este archivo a config/server.yaml. Las rutas relativas parten de la
+# raíz de instalación, la carpeta que contiene config/. Cualquier clave admite
+# una variable de entorno: server.http_port es MEDIANODE_SERVER_HTTP_PORT.
+
+server:
+  name: "MediaNode"
+  bind_address: "0.0.0.0"
+  http_port: 8420
+  # HTTPS estará disponible cuando exista el certificado propio (Fase 11).
+  https_enabled: false
+  https_port: 8421
+  trusted_proxies: []
+  # Orígenes web admitidos además del propio, como "https://media.example.com".
+  cors_origins: []
+  shutdown_timeout_seconds: 30
+
+database:
+  path: "./data/medianode.db"
+  journal_mode: "WAL"
+  busy_timeout_ms: 5000
+
+paths:
+  metadata: "./data/metadata"
+  images: "./data/images"
+  cache: "./data/cache"
+  transcodes: "./data/transcodes"
+  logs: "./logs"
+  backups: "./backups"
+
+logging:
+  level: "info"
+
+scanner:
+  workers: 2
+  reconcile_interval_minutes: 60
+  missing_file_retention_days: 30
+
+# Metadatos, imágenes y clasificación por edades desde TMDB. Sin clave, el
+# catálogo usa los datos del nombre de cada archivo. Mejor por variable de
+# entorno que en este archivo: MEDIANODE_METADATA_TMDB_API_KEY.
+metadata:
+  provider: "tmdb"      # tmdb o none
+  language: "es-ES"     # su región elige la clasificación por edades
+  tmdb_api_key: ""
+
+transcoding:
+  max_concurrent_jobs: 1
+  max_concurrent_light_jobs: 4
+  segment_seconds: 6
+  seek_restart_segments: 5
+  hardware_acceleration: "auto"
+  cleanup_after_minutes: 30
+  max_disk_gb: 20
+
+sessions:
+  heartbeat_timeout_seconds: 90
+  progress_persist_interval_seconds: 30
+  completed_threshold_percent: 90
+
+discovery:
+  mdns_enabled: true
+  dlna_enabled: false
+
+remote:
+  enabled: false
+  direct_enabled: false
+  relay_enabled: false
+  admin_enabled: false

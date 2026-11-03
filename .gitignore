@@ -1,0 +1,29 @@
+# Binarios y compilación
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Datos locales de ejecución
+/data/
+/logs/
+/backups/
+/config/server.yaml
+*.db
+*.db-shm
+*.db-wal
+
+# Fixtures generados por scripts/gen-fixtures
+/testdata/fixtures/
+
+# Cliente web
+node_modules/
+web/dist/*
+!web/dist/.gitkeep
+
+# Editores y sistema
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

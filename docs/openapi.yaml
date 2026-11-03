@@ -1,0 +1,1538 @@
+openapi: 3.0.3
+info:
+  title: MediaNode API
+  version: "1"
+  description: >
+    Contrato de /api/v1. Los clientes nativos usan Authorization Bearer. El cliente
+    web envía platform "web" al iniciar sesión y recibe cookies HttpOnly; sus
+    escrituras llevan la cabecera X-MediaNode-CSRF con el valor de la cookie mn_csrf.
+servers:
+  - url: /api/v1
+security:
+  - bearer: []
+  - cookie: []
+paths:
+  /health:
+    get:
+      summary: Supervisión. Está fuera de /api/v1
+      security: []
+      responses:
+        "200":
+          description: Servidor activo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /server/info:
+    get:
+      summary: Información pública
+      security: []
+      responses:
+        "200":
+          description: Información del servidor
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerInfo" }
+  /server/version:
+    get:
+      summary: Versión instalada
+      security: []
+      responses:
+        "200":
+          description: Versión
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerVersion" }
+  /server/capabilities:
+    get:
+      summary: Capacidades del servidor
+      description: Pública. Lo que llega en fases posteriores figura como false.
+      security: []
+      responses:
+        "200":
+          description: Capacidades
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerCapabilities" }
+  /server/status:
+    get:
+      summary: Estado del servidor
+      description: El objeto admin solo llega a administradores.
+      responses:
+        "200":
+          description: Estado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/setup:
+    post:
+      summary: Crear el Owner con el código inicial
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetupRequest" }
+      responses:
+        "201":
+          description: Owner creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/login:
+    post:
+      summary: Iniciar sesión
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Sesión iniciada. Con platform "web" los tokens van en cookies
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/refresh:
+    post:
+      summary: Renovar tokens
+      description: >
+        El cliente web no envía cuerpo: usa la cookie mn_refresh y debe incluir la
+        cabecera CSRF. Reutilizar un token ya rotado fuera de la ventana de 30 s
+        revoca el dispositivo.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshRequest" }
+      responses:
+        "200":
+          description: Tokens renovados
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      summary: Revocar el dispositivo actual
+      responses:
+        "204": { description: Sesión cerrada }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/me:
+    get:
+      summary: Usuario actual
+      responses:
+        "200":
+          description: Usuario
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/pairing:
+    post:
+      summary: Pedir un código de vinculación
+      description: Lo llama el dispositivo sin sesión, que muestra el código en pantalla.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceInfo" }
+      responses:
+        "201":
+          description: Código creado. Caduca en 5 minutos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingCode" }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/pairing/claim:
+    post:
+      summary: Reclamar un código desde una sesión iniciada
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PairingClaimRequest" }
+      responses:
+        "200":
+          description: Dispositivo vinculado a la cuenta
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingClaim" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/pairing/token:
+    post:
+      summary: Recoger los tokens tras la vinculación
+      description: El dispositivo lo consulta hasta recibir 200. Entrega los tokens una sola vez.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PairingTokenRequest" }
+      responses:
+        "200":
+          description: Tokens del dispositivo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "202": { description: Aún sin reclamar }
+        "400": { $ref: "#/components/responses/Error" }
+  /users/me/preferences:
+    get:
+      summary: Consultar preferencias
+      responses:
+        "200":
+          description: Preferencias
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      summary: Guardar preferencias
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Preferences" }
+      responses:
+        "200":
+          description: Preferencias guardadas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /users/me/password:
+    put:
+      summary: Cambiar la contraseña propia
+      description: Revoca los demás dispositivos del usuario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePasswordRequest" }
+      responses:
+        "204": { description: Contraseña cambiada }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /devices:
+    get:
+      summary: Listar dispositivos
+      parameters:
+        - name: scope
+          in: query
+          description: Con "all", los de todos los usuarios. Solo administradores.
+          schema: { type: string, enum: [all] }
+      responses:
+        "200":
+          description: Dispositivos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /devices/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Detalle de un dispositivo
+      responses:
+        "200":
+          description: Dispositivo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Cambiar el nombre
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenameDeviceRequest" }
+      responses:
+        "200":
+          description: Dispositivo actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Revocar
+      responses:
+        "204": { description: Dispositivo revocado }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/users:
+    get:
+      summary: Listar usuarios
+      responses:
+        "200":
+          description: Usuarios
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Crear usuario de rango inferior al propio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+      responses:
+        "201":
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /admin/users/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Detalle de usuario
+      responses:
+        "200":
+          description: Usuario
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Actualizar usuario
+      description: Cambiar la contraseña revoca todos los dispositivos del usuario.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateUserRequest" }
+      responses:
+        "200":
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Eliminar usuario
+      responses:
+        "204": { description: Usuario eliminado }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /admin/users/{id}/permissions:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Permisos por biblioteca del usuario
+      responses:
+        "200":
+          description: Permisos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Permissions" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      summary: Sustituir los permisos por biblioteca
+      description: >-
+        Sustituye todos los permisos. manage incluye scan y scan incluye view.
+        Owner y administradores acceden a todo y no admiten permisos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Permissions" }
+      responses:
+        "200":
+          description: Permisos guardados
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Permissions" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /libraries:
+    get:
+      summary: Listar bibliotecas autorizadas
+      description: Las rutas físicas solo aparecen para los administradores.
+      responses:
+        "200":
+          description: Bibliotecas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Library" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Crear biblioteca
+      description: Solo administradores.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateLibraryRequest" }
+      responses:
+        "201":
+          description: Biblioteca creada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Library" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /libraries/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Detalle de biblioteca
+      responses:
+        "200":
+          description: Biblioteca
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Library" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Actualizar biblioteca
+      description: Exige el permiso manage. El tipo no se puede cambiar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateLibraryRequest" }
+      responses:
+        "200":
+          description: Biblioteca actualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Library" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Eliminar biblioteca
+      description: Solo administradores. Detiene su escaneo en curso.
+      responses:
+        "204": { description: Biblioteca eliminada }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /libraries/{id}/paths:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Añadir ruta
+      description: >-
+        Solo administradores. La ruta debe ser absoluta, existir, poder leerse
+        y no solaparse con otra de la biblioteca ni con los directorios del servidor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddPathRequest" }
+      responses:
+        "201":
+          description: Ruta añadida
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LibraryPath" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /libraries/{id}/paths/{pathId}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+      - name: pathId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      summary: Quitar ruta
+      description: Solo administradores. Sus archivos se borran sin retención.
+      responses:
+        "204": { description: Ruta quitada }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /libraries/{id}/scan:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Iniciar escaneo
+      description: Exige el permiso scan. Si ya hay uno en curso, lo devuelve.
+      responses:
+        "202":
+          description: Escaneo en curso
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScanJob" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      summary: Estado del último escaneo
+      responses:
+        "200":
+          description: Último escaneo
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScanJob" }
+        "204": { description: La biblioteca nunca se ha escaneado }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /libraries/{id}/items:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Contenido de la biblioteca
+      description: >-
+        Elementos principales por título ordenable, paginados por cursor. Un
+        usuario restringido solo ve edades conocidas hasta su límite.
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 200, default: 50 }
+        - name: metadata_status
+          in: query
+          description: Solo los elementos en ese estado, para la identificación manual.
+          schema: { $ref: "#/components/schemas/MetadataStatus" }
+      responses:
+        "200":
+          description: Página
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /search:
+    get:
+      summary: Búsqueda por título
+      description: >-
+        Sin acentos ni mayúsculas; cada palabra cuenta como prefijo y todas deben
+        coincidir. Solo en las bibliotecas que el actor puede ver.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, maxLength: 200 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Resultados por relevancia
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SearchResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /media/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Detalle de un elemento
+      responses:
+        "200":
+          description: Elemento
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/children:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Temporadas de una serie o episodios de una temporada
+      responses:
+        "200":
+          description: Hijos ordenados por número
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Child" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/files:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Versiones y archivos
+      responses:
+        "200":
+          description: Archivos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MediaFile" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/streams:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Pistas de todos los archivos del elemento
+      responses:
+        "200":
+          description: Pistas
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Stream" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/subtitles:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Subtítulos externos
+      description: Los internos son pistas y llegan en /streams.
+      responses:
+        "200":
+          description: Subtítulos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Subtitle" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/images/{type}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+      - name: type
+        in: path
+        required: true
+        schema: { type: string, enum: [poster, backdrop, thumbnail, logo] }
+    get:
+      summary: Imagen descargada
+      description: >-
+        Nunca descarga: si la imagen aún no está en disco responde 404. Lleva
+        Cache-Control private y ETag, y responde 304 a If-None-Match.
+      responses:
+        "200":
+          description: Imagen
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        "304": { description: Sin cambios }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /media/{id}/matches:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Buscar coincidencias en el proveedor
+      description: >-
+        Exige el permiso manage. Solo películas y series. Sin query usa el título
+        y el año del elemento.
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string, maxLength: 500 }
+        - name: year
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Coincidencias
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Match" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/{id}/identify:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Elegir coincidencia
+      description: >-
+        Exige el permiso manage. Aplica los metadatos en el momento; las imágenes
+        se descargan después. Un elemento bloqueado responde METADATA_LOCKED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IdentifyRequest" }
+      responses:
+        "200":
+          description: Elemento actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/{id}/refresh:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Forzar actualización
+      description: >-
+        Exige el permiso manage. Devuelve el elemento a la cola; si ya está
+        identificado, se piden los detalles por su identificador.
+      responses:
+        "202": { description: En cola }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /media/{id}/metadata:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    patch:
+      summary: Editar y bloquear metadatos
+      description: >-
+        Exige el permiso manage. Cambia los campos presentes; null vacía un campo
+        opcional. Editar bloquea el elemento salvo que se envíe locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EditMetadataRequest" }
+      responses:
+        "200":
+          description: Elemento actualizado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /playback/sessions/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    get:
+      summary: Consultar sesión
+      description: >-
+        Solo su usuario. Una sesión terminada se sigue consultando: su posición
+        permite crear otra tras SESSION_EXPIRED.
+      responses:
+        "200":
+          description: Sesión
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlaybackSession" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Heartbeat y cambio de estado
+      description: >-
+        Estado playing o paused y posición. Una sesión terminada responde 410
+        SESSION_EXPIRED; una transición fuera de la tabla, VALIDATION_ERROR.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HeartbeatRequest" }
+      responses:
+        "200":
+          description: Sesión actualizada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlaybackSession" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Cerrar sesión
+      description: >-
+        Pasa a completed si se superó el umbral y a stopped si no. Cerrar una
+        sesión ya terminada no es un error.
+      responses:
+        "204": { description: Sesión cerrada }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /playback/progress:
+    put:
+      summary: Guardar progreso
+      description: >-
+        Un dato más antiguo que el guardado no lo sustituye, y la respuesta
+        devuelve el vigente. Una hora de cliente futura se cambia por la del servidor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProgressRequest" }
+      responses:
+        "200":
+          description: Progreso vigente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Progress" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /playback/continue-watching:
+    get:
+      summary: Continuar viendo
+      description: Empezado y sin completar, lo más reciente primero, solo de lo visible.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Elementos
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ContinueItem" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /playback/history:
+    get:
+      summary: Historial propio
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Página
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /events:
+    get:
+      summary: Eventos por WebSocket (§17)
+      description: >-
+        Mensajes JSON {event, timestamp, data}. Cada conexión recibe solo lo que su
+        usuario puede consultar por REST. Se acepta el Origin del propio servidor y
+        los de cors_origins; un cliente nativo no envía Origin. La sesión se
+        revalida cada minuto y la conexión se cierra (1008) si deja de valer.
+      responses:
+        "101": { description: Conexión establecida }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /playback/sessions:
+    post:
+      summary: Crear sesión de reproducción (§16.3)
+      description: >-
+        Autoriza, elige archivo y pistas, decide el modo y devuelve una URL opaca con
+        su token. Hasta la Fase 8 solo se sirve Direct Play: si hace falta remux,
+        transcodificación o FFmpeg para el subtítulo, responde 422
+        PLAYBACK_UNSUPPORTED con la decisión y sus motivos en details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSessionRequest" }
+      responses:
+        "201":
+          description: Sesión creada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateSessionResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/file:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Archivo original (Direct Play)
+      description: >-
+        Fuera de /api/v1 y sin sesión: la credencial es el token de la URL, que muere
+        con la sesión. Admite Range (206). Cada petición vuelve a comprobar que el
+        usuario sigue pudiendo ver el elemento.
+      security: []
+      responses:
+        "200":
+          description: Archivo
+          content:
+            video/*:
+              schema: { type: string, format: binary }
+        "206": { description: Rango del archivo }
+        "416": { description: Rango no satisfacible }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+    head:
+      summary: Cabeceras del archivo
+      security: []
+      responses:
+        "200": { description: Cabeceras con Content-Length }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/subtitles/{name}:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+      - name: name
+        in: path
+        required: true
+        description: Identificador del subtítulo y extensión; .vtt de un SRT lo convierte.
+        schema: { type: string }
+    get:
+      summary: Subtítulo externo del archivo de la sesión
+      security: []
+      responses:
+        "200":
+          description: Subtítulo
+          content:
+            text/vtt:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+    cookie: { type: apiKey, in: cookie, name: mn_access }
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      description: Valor opaco de next_cursor de la página anterior.
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error con código estable
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+            request_id: { type: string }
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
+    ServerInfo:
+      type: object
+      required: [name, version, protocol_version, setup_required]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        protocol_version: { type: integer }
+        setup_required: { type: boolean }
+    ServerVersion:
+      type: object
+      required: [version, protocol_version]
+      properties:
+        version: { type: string }
+        protocol_version: { type: integer }
+    DeviceInfo:
+      type: object
+      required: [device_name, platform]
+      properties:
+        device_name: { type: string, maxLength: 100 }
+        platform: { type: string, maxLength: 100 }
+        client_version: { type: string, maxLength: 100 }
+        device_identifier:
+          type: string
+          maxLength: 100
+          description: Valor estable del cliente. Evita crear un dispositivo en cada login.
+    SetupRequest:
+      type: object
+      required: [code, username, password]
+      properties:
+        code: { type: string }
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8, maxLength: 1024 }
+    LoginRequest:
+      allOf:
+        - $ref: "#/components/schemas/DeviceInfo"
+        - type: object
+          required: [username, password]
+          properties:
+            username: { type: string }
+            password: { type: string }
+    RefreshRequest:
+      type: object
+      properties:
+        refresh_token: { type: string }
+    Session:
+      type: object
+      required: [expires_at, user, device_id]
+      properties:
+        access_token: { type: string, description: Ausente en el cliente web }
+        refresh_token: { type: string, description: Ausente en el cliente web }
+        expires_at: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/User" }
+        device_id: { type: string }
+    PairingCode:
+      type: object
+      required: [code, poll_token, expires_at]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 6 }
+        poll_token: { type: string }
+        expires_at: { type: string, format: date-time }
+    PairingClaimRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    PairingClaim:
+      type: object
+      required: [device_name, platform]
+      properties:
+        device_name: { type: string }
+        platform: { type: string }
+    PairingTokenRequest:
+      type: object
+      required: [poll_token]
+      properties:
+        poll_token: { type: string }
+    User:
+      type: object
+      required: [id, username, role, is_active, created_at]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        is_active: { type: boolean }
+        max_age_rating: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_login_at: { type: string, format: date-time, nullable: true }
+    Role:
+      type: string
+      enum: [owner, admin, user, restricted]
+    CreateUserRequest:
+      type: object
+      required: [username, password, role]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8, maxLength: 1024 }
+        role: { $ref: "#/components/schemas/Role" }
+        max_age_rating: { type: integer, minimum: 0, nullable: true }
+    UpdateUserRequest:
+      type: object
+      description: Solo cambian los campos presentes. Un null en max_age_rating lo borra.
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8, maxLength: 1024 }
+        role: { $ref: "#/components/schemas/Role" }
+        is_active: { type: boolean }
+        max_age_rating: { type: integer, minimum: 0, nullable: true }
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string }
+        new_password: { type: string, minLength: 8, maxLength: 1024 }
+    Preferences:
+      type: object
+      required: [subtitle_mode]
+      properties:
+        audio_language: { type: string, nullable: true, maxLength: 35 }
+        subtitle_language: { type: string, nullable: true, maxLength: 35 }
+        subtitle_mode: { type: string, enum: [default, forced, always, "off"] }
+        max_bitrate_remote: { type: integer, minimum: 1, nullable: true }
+    Device:
+      type: object
+      required: [id, user_id, device_name, platform, created_at, current]
+      properties:
+        id: { type: string }
+        user_id: { type: string }
+        device_name: { type: string }
+        platform: { type: string }
+        client_version: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        current: { type: boolean }
+    RenameDeviceRequest:
+      type: object
+      required: [device_name]
+      properties:
+        device_name: { type: string, maxLength: 100 }
+    Library:
+      type: object
+      required: [id, name, type, enabled, dlna_enabled, created_at, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        type: { type: string, enum: [movies, tv] }
+        enabled: { type: boolean }
+        dlna_enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        paths:
+          type: array
+          description: Solo para administradores.
+          items: { $ref: "#/components/schemas/LibraryPath" }
+    LibraryPath:
+      type: object
+      required: [id, path, is_available, last_scan_at]
+      properties:
+        id: { type: string }
+        path: { type: string }
+        is_available: { type: boolean }
+        last_scan_at: { type: string, format: date-time, nullable: true }
+    CreateLibraryRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, maxLength: 100 }
+        type: { type: string, enum: [movies, tv] }
+        dlna_enabled: { type: boolean }
+        paths:
+          type: array
+          items: { type: string }
+    UpdateLibraryRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        enabled: { type: boolean }
+        dlna_enabled: { type: boolean }
+    AddPathRequest:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+    ScanJob:
+      type: object
+      required: [id, library_id, trigger, status, files_discovered, files_processed]
+      properties:
+        id: { type: string }
+        library_id: { type: string }
+        trigger: { type: string, enum: [manual, scheduled, watcher] }
+        status: { type: string, enum: [running, completed, failed, interrupted] }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        files_discovered: { type: integer }
+        files_processed: { type: integer }
+        error_message: { type: string, nullable: true }
+    Permissions:
+      type: object
+      required: [libraries]
+      properties:
+        libraries:
+          type: array
+          items:
+            type: object
+            required: [library_id, permissions]
+            properties:
+              library_id: { type: string }
+              permissions:
+                type: array
+                items: { type: string, enum: [view, scan, manage] }
+    ServerCapabilities:
+      type: object
+      required: [protocol_version, metadata_provider, image_types, search, direct_play, transcoding, hls, events]
+      properties:
+        protocol_version: { type: integer }
+        metadata_provider: { type: string, nullable: true }
+        image_types:
+          type: array
+          items: { type: string }
+        search: { type: boolean }
+        direct_play: { type: boolean }
+        transcoding: { type: boolean }
+        hls: { type: boolean }
+        events: { type: boolean }
+    ServerStatus:
+      type: object
+      required: [status, version, uptime_seconds]
+      properties:
+        status: { type: string }
+        version: { type: string }
+        uptime_seconds: { type: integer }
+        admin:
+          type: object
+          required: [ffprobe_available, libraries, scans_running, metadata]
+          properties:
+            ffprobe_available: { type: boolean }
+            libraries: { type: integer }
+            scans_running: { type: integer }
+            metadata:
+              type: object
+              required: [provider, configured, pending, paused_until, last_error]
+              properties:
+                provider: { type: string, nullable: true }
+                configured: { type: boolean }
+                pending: { type: integer }
+                paused_until: { type: string, format: date-time, nullable: true }
+                last_error: { type: string, nullable: true }
+    MetadataStatus:
+      type: string
+      enum: [pending, done, unmatched, failed]
+    ItemSummary:
+      type: object
+      required: [id, type, title, year, metadata_status, poster_url]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [movie, series] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        metadata_status: { $ref: "#/components/schemas/MetadataStatus" }
+        poster_url: { type: string, nullable: true }
+    ItemPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ItemSummary" }
+        next_cursor: { type: string, nullable: true }
+    Item:
+      type: object
+      required: [id, library_id, type, title, metadata_status, metadata_locked, genres, people, external_ids, images, created_at, updated_at]
+      properties:
+        id: { type: string }
+        library_id: { type: string }
+        parent_id: { type: string, nullable: true }
+        type: { type: string, enum: [movie, series, season, episode] }
+        title: { type: string }
+        original_title: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        release_date: { type: string, format: date, nullable: true }
+        overview: { type: string, nullable: true }
+        age_rating: { type: string, nullable: true, description: "País y clasificación original, como ES:16." }
+        min_age: { type: integer, nullable: true }
+        original_language: { type: string, nullable: true }
+        duration_ms: { type: integer, nullable: true }
+        season_number: { type: integer, nullable: true }
+        episode_number: { type: integer, nullable: true }
+        metadata_status: { $ref: "#/components/schemas/MetadataStatus" }
+        metadata_locked: { type: boolean }
+        genres:
+          type: array
+          items: { type: string }
+        people:
+          type: array
+          items:
+            type: object
+            required: [id, name, role]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              role: { type: string, enum: [actor, director, writer, creator] }
+              character: { type: string, nullable: true }
+        external_ids:
+          type: object
+          additionalProperties: { type: string }
+        images:
+          type: object
+          description: URL de cada tipo de imagen ya descargada.
+          additionalProperties: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Child:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [season, episode] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        season_number: { type: integer, nullable: true }
+        episode_number: { type: integer, nullable: true }
+        overview: { type: string, nullable: true }
+        release_date: { type: string, format: date, nullable: true }
+        duration_ms: { type: integer, nullable: true }
+        image_url: { type: string, nullable: true }
+    MediaFile:
+      type: object
+      required: [id, probe_status, part_order]
+      properties:
+        id: { type: string }
+        relative_path: { type: string, description: Solo para administradores. }
+        container: { type: string, nullable: true }
+        file_size: { type: integer, nullable: true }
+        duration_ms: { type: integer, nullable: true }
+        bitrate: { type: integer, nullable: true }
+        probe_status: { type: string, enum: [pending, done, failed] }
+        missing_since: { type: string, format: date-time, nullable: true }
+        part_order: { type: integer }
+    Stream:
+      type: object
+      required: [id, file_id, index, type, default, forced]
+      properties:
+        id: { type: string }
+        file_id: { type: string }
+        index: { type: integer }
+        type: { type: string, enum: [video, audio, subtitle, attachment, data] }
+        codec: { type: string, nullable: true }
+        profile: { type: string, nullable: true }
+        level: { type: string, nullable: true }
+        language: { type: string, nullable: true }
+        channels: { type: integer, nullable: true }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        frame_rate: { type: string, nullable: true }
+        bitrate: { type: integer, nullable: true }
+        bit_depth: { type: integer, nullable: true }
+        color_transfer: { type: string, nullable: true }
+        color_primaries: { type: string, nullable: true }
+        hdr_format: { type: string, nullable: true }
+        default: { type: boolean }
+        forced: { type: boolean }
+        title: { type: string, nullable: true }
+    Subtitle:
+      type: object
+      required: [id, file_id, language, default, forced]
+      properties:
+        id: { type: string }
+        file_id: { type: string }
+        relative_path: { type: string, description: Solo para administradores. }
+        language: { type: string }
+        format: { type: string, nullable: true }
+        default: { type: boolean }
+        forced: { type: boolean }
+    SearchResult:
+      type: object
+      required: [id, type, title, library_id]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [movie, series, episode] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        library_id: { type: string }
+        parent_id: { type: string, nullable: true }
+        parent_title: { type: string, nullable: true, description: Serie de un episodio. }
+    Match:
+      type: object
+      required: [provider, external_id, title]
+      properties:
+        provider: { type: string }
+        external_id: { type: string }
+        title: { type: string }
+        original_title: { type: string }
+        year: { type: integer, nullable: true }
+        overview: { type: string }
+        poster_url: { type: string, nullable: true, description: URL del proveedor. }
+    IdentifyRequest:
+      type: object
+      required: [provider, external_id]
+      properties:
+        provider: { type: string }
+        external_id: { type: string }
+    EditMetadataRequest:
+      type: object
+      properties:
+        title: { type: string, maxLength: 500 }
+        original_title: { type: string, nullable: true, maxLength: 500 }
+        overview: { type: string, nullable: true, maxLength: 10000 }
+        year: { type: integer, nullable: true, minimum: 1800, maximum: 2200 }
+        release_date: { type: string, format: date, nullable: true }
+        age_rating: { type: string, nullable: true, maxLength: 50 }
+        min_age: { type: integer, nullable: true, minimum: 0, maximum: 21 }
+        locked: { type: boolean }
+    PlaybackSession:
+      type: object
+      required: [session_id, status, media_item_id, media_file_id, playback_mode, start_position_ms, position_ms, started_at, idle_timeout_seconds]
+      properties:
+        session_id: { type: string }
+        status: { type: string, enum: [created, initializing, playing, paused, stopping, completed, stopped, failed, expired] }
+        media_item_id: { type: string }
+        media_file_id: { type: string }
+        playback_mode: { type: string }
+        start_position_ms: { type: integer }
+        position_ms: { type: integer }
+        duration_ms: { type: integer, nullable: true }
+        started_at: { type: string, format: date-time }
+        last_activity_at: { type: string, format: date-time, nullable: true }
+        ended_at: { type: string, format: date-time, nullable: true }
+        idle_timeout_seconds: { type: integer }
+    HeartbeatRequest:
+      type: object
+      required: [state, position_ms]
+      properties:
+        state: { type: string, enum: [playing, paused] }
+        position_ms: { type: integer, minimum: 0 }
+    ProgressRequest:
+      type: object
+      required: [media_item_id, position_ms]
+      properties:
+        media_item_id: { type: string }
+        position_ms: { type: integer, minimum: 0 }
+        duration_ms: { type: integer, nullable: true }
+        completed: { type: boolean, nullable: true, description: Sin él se calcula con el umbral. }
+        client_time: { type: string, format: date-time, nullable: true }
+    Progress:
+      type: object
+      required: [media_item_id, position_ms, completed, updated_at]
+      properties:
+        media_item_id: { type: string }
+        position_ms: { type: integer }
+        duration_ms: { type: integer, nullable: true }
+        completed: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    ContinueItem:
+      type: object
+      required: [id, type, title, position_ms, updated_at]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [movie, episode] }
+        title: { type: string }
+        year: { type: integer, nullable: true }
+        season_number: { type: integer, nullable: true }
+        episode_number: { type: integer, nullable: true }
+        series_id: { type: string, nullable: true }
+        series_title: { type: string, nullable: true }
+        position_ms: { type: integer }
+        duration_ms: { type: integer, nullable: true }
+        updated_at: { type: string, format: date-time }
+        image_url: { type: string, nullable: true }
+    HistoryPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, title, position_ms, completed, watched_at]
+            properties:
+              id: { type: string }
+              media_item_id: { type: string, nullable: true }
+              device_id: { type: string, nullable: true }
+              title: { type: string }
+              position_ms: { type: integer }
+              completed: { type: boolean }
+              watched_at: { type: string, format: date-time }
+        next_cursor: { type: string, nullable: true }
+    ClientProfile:
+      type: object
+      description: >-
+        Lo que no se envía toma el valor predefinido de la plataforma; lo enviado,
+        aunque sea una lista vacía, manda. Los nombres desconocidos se descartan.
+      properties:
+        platform: { type: string, example: web }
+        containers: { type: array, items: { type: string, enum: [mp4, mkv, webm, mov, ts, avi] } }
+        video_codecs: { type: array, items: { type: string, enum: [h264, hevc, vp8, vp9, av1, mpeg4, mpeg2, vc1] } }
+        audio_codecs: { type: array, items: { type: string, enum: [aac, mp3, ac3, eac3, dts, truehd, opus, vorbis, flac, alac, pcm] } }
+        subtitle_formats: { type: array, items: { type: string, enum: [srt, vtt, ass, ssa, pgs, vobsub, dvbsub, mov_text] } }
+        subtitle_delivery: { type: array, items: { type: string, enum: [sidecar, hls, embedded] } }
+        protocols: { type: array, items: { type: string, enum: [http, hls] } }
+        hdr: { type: array, items: { type: string, enum: [hdr10, hlg, dolby_vision] } }
+        max_resolution: { type: string, example: 1920x1080 }
+        max_bit_depth: { type: integer, minimum: 8, maximum: 16 }
+        max_audio_channels: { type: integer, minimum: 1, maximum: 16 }
+    CreateSessionRequest:
+      type: object
+      required: [media_item_id]
+      properties:
+        media_item_id: { type: string }
+        media_file_id: { type: string, description: Versión elegida; sin ella, la mejor compatible. }
+        device_id: { type: string, description: Si se envía, debe ser el de la sesión iniciada. }
+        client_profile: { $ref: "#/components/schemas/ClientProfile" }
+        selected_audio_stream_id: { type: string, nullable: true }
+        selected_subtitle_id: { type: string, nullable: true, description: "Pista interna o subtítulo externo; none los desactiva." }
+        max_bitrate: { type: integer, nullable: true }
+        max_resolution: { type: string }
+        preferred_protocol: { type: string, enum: [http, hls] }
+        start_position_ms: { type: integer, minimum: 0 }
+    CreateSessionResponse:
+      type: object
+      required: [session_id, status, media_file_id, playback_mode, protocol, video_action, audio_action, subtitle_mode, stream_url, idle_timeout_seconds, reasons]
+      properties:
+        session_id: { type: string }
+        status: { type: string }
+        media_file_id: { type: string }
+        playback_mode: { type: string, enum: [direct_play, direct_stream, transcode] }
+        protocol: { type: string, enum: [http, hls] }
+        container: { type: string }
+        video_action: { type: string, enum: [copy, transcode, none] }
+        audio_action: { type: string, enum: [copy, transcode, none] }
+        video_codec: { type: string, nullable: true }
+        audio_codec: { type: string, nullable: true }
+        subtitle_mode: { type: string, enum: [none, embedded, sidecar, convert, hls, burn_in] }
+        selected_audio_stream_id: { type: string, nullable: true }
+        selected_subtitle_id: { type: string, nullable: true }
+        stream_url: { type: string }
+        subtitle_url: { type: string, nullable: true }
+        start_position_ms: { type: integer }
+        duration_ms: { type: integer, nullable: true }
+        idle_timeout_seconds: { type: integer }
+        reasons:
+          type: array
+          items:
+            type: object
+            required: [code, stream]
+            properties:
+              code: { type: string }
+              stream: { type: string, enum: [container, video, audio, subtitle, limits] }
