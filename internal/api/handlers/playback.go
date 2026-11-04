@@ -11,6 +11,7 @@ import (
 
 	"medianode/internal/api"
 	"medianode/internal/api/dto"
+	"medianode/internal/api/middleware"
 	"medianode/internal/core"
 	"medianode/internal/database"
 	"medianode/internal/media"
@@ -24,6 +25,7 @@ type Playback struct {
 	Sessions *sessions.Manager
 	Progress *sessions.Progress
 	Playback *playback.Service
+	Network  *middleware.Network
 	Log      zerolog.Logger
 }
 
@@ -57,6 +59,7 @@ func (h *Playback) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Profile: profile, Declared: declared, AudioStreamID: req.SelectedAudioStreamID,
 		SubtitleID: req.SelectedSubtitleID, MaxBitrate: req.MaxBitrate, MaxResolution: req.MaxResolution,
 		PreferredProtocol: req.PreferredProtocol, StartPositionMS: req.StartPositionMS,
+		ClientIP: h.Network.ClientIP(r),
 	})
 	if err != nil {
 		api.WriteFailure(w, r, h.Log, err)

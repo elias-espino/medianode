@@ -18,9 +18,11 @@ import (
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 
+	"medianode/internal/admin"
 	"medianode/internal/api/middleware"
 	"medianode/internal/auth"
 	"medianode/internal/authorization"
+	"medianode/internal/config"
 	"medianode/internal/database"
 	"medianode/internal/devices"
 	"medianode/internal/events"
@@ -69,6 +71,8 @@ type env struct {
 
 	transcoder *transcoding.Manager
 	indexer    *transcoding.Indexer
+	admin      *admin.Service
+	dataDir    string
 }
 
 func newEnv(t *testing.T) *env {
@@ -135,8 +139,23 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 		caps = probeFFmpeg(t, eo.ffmpeg)
 		ps.Features = playback.FeaturesOf(caps)
 	}
+	dataDir := t.TempDir()
+	cfg := *config.Default()
+	cfg.Database.Path = filepath.Join(dataDir, "medianode.db")
+	cfg.Paths = config.Paths{
+		Metadata: filepath.Join(dataDir, "metadata"), Images: imgDir, Cache: filepath.Join(dataDir, "cache"),
+		Transcodes: filepath.Join(dataDir, "transcodes"), Logs: filepath.Join(dataDir, "logs"), Backups: filepath.Join(dataDir, "backups"),
+	}
+	metrics := monitoring.NewMetrics()
+	adminSvc := &admin.Service{
+		Version: "1.2.3", Started: time.Now(), ConfigPath: filepath.Join(dataDir, "server.yaml"), Config: cfg, DB: db,
+		FFmpegPath: eo.ffmpeg, FFprobePath: eo.ffprobe, FFmpeg: caps, Sessions: sm, Transcoder: tm,
+		Metrics: metrics, CPU: monitoring.NewProcessSampler(),
+	}
 	return &env{t: t, code: code, logs: logs, db: db, imgDir: imgDir, sessions: sm, bus: bus, auth: a, devices: ds, playback: ps,
+		admin: adminSvc, dataDir: dataDir,
 		transcoder: tm, indexer: indexer, h: NewRouter(Deps{
+			Admin: adminSvc, Metrics: metrics,
 			Log: log, Name: "Prueba", Version: "1.2.3",
 			Auth: a, Users: us, Devices: ds, Libraries: libs,
 			Catalog: readmodel.New(db, authz), Metadata: metadata.NewService(db, authz, enricher),

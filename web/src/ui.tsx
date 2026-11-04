@@ -143,3 +143,41 @@ export function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" });
 }
+
+// usePolling llama a reload cada ms milisegundos mientras la pestaña está a la
+// vista: una pantalla de administración abierta en segundo plano no debe
+// consultar al servidor.
+export function usePolling(reload: () => void, ms: number) {
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!document.hidden) reload();
+    }, ms);
+    return () => window.clearInterval(id);
+  }, [reload, ms]);
+}
+
+export function formatBitrate(bps: number | null | undefined): string {
+  if (!bps) return "—";
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mb/s`;
+  return `${Math.round(bps / 1000)} kb/s`;
+}
+
+export function formatUptime(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d) return `${d} d ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  return `${m} min`;
+}
+
+// Bar es una barra de uso: ratio entre 0 y 1.
+export function Bar({ ratio, label }: { ratio: number; label: string }) {
+  const pct = Math.min(Math.max(ratio, 0), 1) * 100;
+  const tone = pct >= 90 ? "bar-fill bar-high" : "bar-fill";
+  return (
+    <div className="bar" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
+      <div className={tone} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}

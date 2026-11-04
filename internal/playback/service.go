@@ -41,6 +41,7 @@ type Request struct {
 	MaxResolution     string
 	PreferredProtocol string // Se usará con HLS, en la Fase 8.
 	StartPositionMS   int64
+	ClientIP          string // Opcional: se guarda en la sesión.
 }
 
 // Response es lo que recibe el cliente (§9.5).
@@ -185,7 +186,7 @@ func (s *Service) CreateSession(ctx context.Context, actor authorization.Actor, 
 	sess, err := s.sessions.Create(ctx, sessions.CreateParams{
 		ID: sessionID, UserID: actor.UserID, DeviceID: actor.DeviceID, ItemID: req.ItemID, FileID: best.file.ID,
 		Mode: string(best.decision.Mode), StartPositionMS: req.StartPositionMS,
-		AudioStreamID: idOf(best.tracks.Audio), SubtitleID: best.tracks.SubtitleID(),
+		AudioStreamID: idOf(best.tracks.Audio), SubtitleID: best.tracks.SubtitleID(), ClientIP: req.ClientIP,
 	})
 	if err != nil {
 		if kind != "" {

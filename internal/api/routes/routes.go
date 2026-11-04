@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
+	"medianode/internal/admin"
 	"medianode/internal/api"
 	"medianode/internal/api/handlers"
 	"medianode/internal/api/middleware"
@@ -57,6 +58,8 @@ type Deps struct {
 	Playback       *playback.Service
 	Transcoder     *transcoding.Manager
 	FFmpeg         *ffmpeg.Capabilities
+	Admin          *admin.Service
+	Metrics        *monitoring.Metrics // Opcional: mide la latencia de los endpoints.
 	DB             *database.DB
 	Bus            *events.Bus
 	Authorizer     *authorization.Authorizer
@@ -75,6 +78,9 @@ func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(monitoring.WithRequestID)
+	if deps.Metrics != nil {
+		r.Use(deps.Metrics.Middleware)
+	}
 	r.Use(middleware.AccessLog(deps.Log))
 	r.Use(middleware.Recover(deps.Log))
 	r.Use(middleware.CORS(deps.CORSOrigins))
@@ -93,8 +99,8 @@ func NewRouter(deps Deps) http.Handler {
 		FFmpeg: deps.FFmpeg,
 	}
 	mediaH := &handlers.Media{Catalog: deps.Catalog, Metadata: deps.Metadata, Images: deps.Images, Log: deps.Log}
-	playbackH := &handlers.Playback{Sessions: deps.Sessions, Progress: deps.Progress, Playback: deps.Playback, Log: deps.Log}
-	adminH := &handlers.Admin{Transcoder: deps.Transcoder, Sessions: deps.Sessions, Log: deps.Log}
+	playbackH := &handlers.Playback{Sessions: deps.Sessions, Progress: deps.Progress, Playback: deps.Playback, Network: network, Log: deps.Log}
+	adminH := &handlers.Admin{Transcoder: deps.Transcoder, Sessions: deps.Sessions, Service: deps.Admin, Log: deps.Log}
 	streamH := &handlers.Stream{DB: deps.DB, Sessions: deps.Sessions, Playback: deps.Playback, Transcoder: deps.Transcoder, Log: deps.Log}
 	eventsH := &websocket.Handler{
 		Bus: deps.Bus, Libs: deps.Authorizer, Authenticate: deps.Auth.Authenticate,
@@ -193,6 +199,14 @@ func NewRouter(deps Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole(media.RoleAdmin))
 
+				r.Get("/admin/system", adminH.System)
+				r.Get("/admin/metrics", adminH.Metrics)
+				r.Get("/admin/sessions", adminH.ActiveSessions)
+				r.Get("/admin/network", adminH.Network)
+				r.Get("/admin/storage", adminH.Storage)
+				r.Get("/admin/logs", adminH.Logs)
+				r.Get("/admin/settings", adminH.Settings)
+				r.Get("/admin/system-check", adminH.SystemCheck)
 				r.Get("/admin/transcodes", adminH.Transcodes)
 				r.Post("/admin/transcodes/{id}/cancel", adminH.CancelTranscode)
 				r.Get("/admin/users", usersH.List)

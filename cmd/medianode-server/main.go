@@ -17,6 +17,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"medianode/internal/admin"
 	"medianode/internal/api"
 	"medianode/internal/api/routes"
 	"medianode/internal/auth"
@@ -238,9 +239,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// Sin FFmpeg el servidor arranca igual, solo con Direct Play.
 	var transcoder *transcoding.Manager
 	var ffcaps *ffmpeg.Capabilities
+	var ffmpegBin string
 	if ffmpegPath, err := ffmpeg.Locate(); err != nil {
 		log.Warn().Err(err).Msg("FFmpeg no encontrado: solo habrá Direct Play")
 	} else {
+		ffmpegBin = ffmpegPath
 		probeCtx, cancel := context.WithTimeout(ctx, time.Minute)
 		ffcaps, err = ffmpeg.Probe(probeCtx, ffmpegPath)
 		cancel()
@@ -272,7 +275,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	metrics := monitoring.NewMetrics()
+	adminService := &admin.Service{
+		Version: version, Started: time.Now(), ConfigPath: *configPath, Config: *cfg, DB: db,
+		FFmpegPath: ffmpegBin, FFprobePath: ffprobe, FFmpeg: ffcaps, Sessions: sessionManager, Transcoder: transcoder,
+		Metrics: metrics, CPU: monitoring.NewProcessSampler(),
+	}
 	router := routes.NewRouter(routes.Deps{
+		Admin:      adminService,
+		Metrics:    metrics,
 		Log:        monitoring.Module(log, "http"),
 		Name:       cfg.Server.Name,
 		Version:    version,

@@ -1106,6 +1106,127 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /admin/system:
+    get:
+      summary: Resumen del servidor y del equipo
+      description: >-
+        Versión, sistema operativo, memoria del proceso, FFmpeg y FFprobe, codificadores
+        (compilados y los que de verdad inician), base de datos y recuentos. Solo
+        administradores.
+      responses:
+        "200":
+          description: Sistema
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminSystem" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/metrics:
+    get:
+      summary: Métricas del servidor (§22.2)
+      description: >-
+        CPU del proceso como porcentaje de toda la máquina, memoria, espacio libre,
+        archivos indexados, duración de los últimos escaneos, sesiones y trabajos
+        activos, errores de transcodificación, bitrate aproximado, conexiones locales y
+        remotas, y latencia (p50, p95 y máximo) de los endpoints más usados. Los
+        endpoints de streaming y de eventos no se miden. Solo administradores.
+      responses:
+        "200":
+          description: Métricas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminMetrics" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/sessions:
+    get:
+      summary: Sesiones de reproducción activas de todos los usuarios
+      description: Solo administradores.
+      responses:
+        "200":
+          description: Sesiones
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AdminSession" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/network:
+    get:
+      summary: Configuración de red y direcciones del servidor
+      description: Solo administradores.
+      responses:
+        "200":
+          description: Red
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminNetwork" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/storage:
+    get:
+      summary: Uso de disco de los datos y de las bibliotecas
+      description: >-
+        Tamaño de cada directorio de datos (si la suma tarda más de 3 s se corta y
+        partial es true) y espacio libre de los volúmenes. Solo administradores.
+      responses:
+        "200":
+          description: Almacenamiento
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminStorage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/logs:
+    get:
+      summary: Últimas líneas del log
+      description: >-
+        Las más recientes primero. Las URL de streaming y los campos sensibles
+        (contraseñas, tokens, claves) se ocultan aunque estén en el archivo. Sin archivo
+        de log, una lista vacía. Solo administradores.
+      parameters:
+        - { name: lines, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 200 } }
+        - { name: level, in: query, description: "Nivel mínimo.", schema: { type: string, enum: [trace, debug, info, warn, error, fatal, panic] } }
+        - { name: q, in: query, description: "Texto que debe aparecer en el mensaje, el módulo o los campos.", schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: Líneas del log
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AdminLogEntry" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "400": { $ref: "#/components/responses/Error" }
+  /admin/settings:
+    get:
+      summary: Configuración efectiva, sin secretos
+      description: >-
+        Tal como la escribiría server.yaml. La clave de TMDB se sustituye por
+        "(configurada)". Es de solo lectura: cambiarla exige editar el archivo y reiniciar.
+        Solo administradores.
+      responses:
+        "200":
+          description: Configuración
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/system-check:
+    get:
+      summary: Diagnóstico del servidor (§19.1)
+      description: >-
+        Doce comprobaciones: FFmpeg, FFprobe, códecs, aceleración por hardware,
+        tone mapping, permisos de las bibliotecas, espacio temporal, SQLite, puerto, mDNS y
+        SSDP, TLS y conectividad remota. Cada una es ok, warn, fail o skipped. Solo
+        administradores.
+      responses:
+        "200":
+          description: Comprobaciones
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AdminCheck" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /admin/transcodes:
     get:
       summary: Trabajos de FFmpeg activos y cupos
@@ -1707,6 +1828,169 @@ components:
         capacity:
           type: object
           additionalProperties: { $ref: "#/components/schemas/Capacity" }
+    AdminSystem:
+      type: object
+      required: [version, os, arch, go_version, cpus, uptime_seconds, config_path, memory, ffmpeg, ffprobe, hardware, database, counts]
+      properties:
+        version: { type: string }
+        os: { type: string }
+        arch: { type: string }
+        go_version: { type: string }
+        cpus: { type: integer }
+        uptime_seconds: { type: integer }
+        config_path: { type: string }
+        memory:
+          type: object
+          required: [alloc_bytes, sys_bytes]
+          properties:
+            alloc_bytes: { type: integer }
+            sys_bytes: { type: integer }
+        ffmpeg: { $ref: "#/components/schemas/AdminTool" }
+        ffprobe: { $ref: "#/components/schemas/AdminTool" }
+        hardware:
+          type: object
+          required: [encoder, encoders_compiled, encoders_working, subtitle_burn_in, tone_mapping, tone_mapping_speed]
+          properties:
+            encoder: { type: string, description: El que usan los trabajos nuevos. }
+            encoders_compiled: { type: array, items: { type: string } }
+            encoders_working: { type: array, items: { type: string } }
+            subtitle_burn_in: { type: boolean }
+            tone_mapping: { type: boolean }
+            tone_mapping_speed: { type: number, nullable: true }
+        database:
+          type: object
+          required: [size_bytes, journal_mode]
+          properties:
+            size_bytes: { type: integer }
+            journal_mode: { type: string }
+        counts:
+          type: object
+          additionalProperties: { type: integer }
+          description: "libraries, files, items y users."
+    AdminTool:
+      type: object
+      required: [available]
+      properties:
+        available: { type: boolean }
+        version: { type: string }
+    AdminMetrics:
+      type: object
+      required: [cpu_percent, memory_bytes, goroutines, disk_free_bytes, disk_total_bytes, files_indexed, active_sessions, active_jobs, transcode_failures, bitrate_bps, connections_local, connections_remote, last_scans, endpoints]
+      properties:
+        cpu_percent: { type: number, description: Del proceso del servidor sobre toda la máquina (100 son todos los núcleos). }
+        memory_bytes: { type: integer }
+        goroutines: { type: integer }
+        disk_free_bytes: { type: integer }
+        disk_total_bytes: { type: integer }
+        files_indexed: { type: integer }
+        active_sessions: { type: integer }
+        active_jobs: { type: integer }
+        transcode_failures: { type: integer, description: Trabajos de FFmpeg con error desde el arranque. }
+        bitrate_bps: { type: integer, description: Suma aproximada de las sesiones activas. }
+        connections_local: { type: integer }
+        connections_remote: { type: integer }
+        last_scans:
+          type: array
+          items:
+            type: object
+            required: [library, status, finished_at, duration_seconds, files_processed]
+            properties:
+              library: { type: string }
+              status: { type: string }
+              finished_at: { type: string, format: date-time }
+              duration_seconds: { type: number }
+              files_processed: { type: integer }
+        endpoints:
+          type: array
+          items:
+            type: object
+            required: [route, count, errors, p50_ms, p95_ms, max_ms, samples]
+            properties:
+              route: { type: string, description: Método y patrón de la ruta. }
+              count: { type: integer }
+              errors: { type: integer, description: Respuestas 5xx. }
+              p50_ms: { type: number }
+              p95_ms: { type: number }
+              max_ms: { type: number }
+              samples: { type: integer }
+    AdminSession:
+      type: object
+      required: [id, user, title, mode, status, position_ms, duration_ms, started_at, last_activity, client_ip, local, bitrate_bps, job, encoder, client_kind, device_id]
+      properties:
+        id: { type: string }
+        user: { type: string }
+        title: { type: string }
+        mode: { type: string }
+        status: { type: string }
+        position_ms: { type: integer }
+        duration_ms: { type: integer, nullable: true }
+        started_at: { type: string, format: date-time }
+        last_activity: { type: string, format: date-time }
+        client_ip: { type: string }
+        local: { type: boolean, description: La IP es de la propia máquina o de la red local. }
+        bitrate_bps: { type: integer, description: "Aproximado: el del archivo, o el de la salida si se transcodifica." }
+        job: { type: string, description: "heavy, light o vacío en Direct Play." }
+        encoder: { type: string }
+        client_kind: { type: string }
+        device_id: { type: string }
+    AdminNetwork:
+      type: object
+      required: [bind_address, http_port, https_enabled, trusted_proxies, cors_origins, addresses, connections_local, connections_remote]
+      properties:
+        bind_address: { type: string }
+        http_port: { type: integer }
+        https_enabled: { type: boolean }
+        trusted_proxies: { type: array, items: { type: string } }
+        cors_origins: { type: array, items: { type: string } }
+        addresses: { type: array, items: { type: string }, description: URL por las que se llega desde la red local. }
+        connections_local: { type: integer }
+        connections_remote: { type: integer }
+    AdminStorage:
+      type: object
+      required: [folders, database_bytes, data, libraries]
+      properties:
+        folders:
+          type: array
+          items:
+            type: object
+            required: [key, path, size_bytes, files, partial]
+            properties:
+              key: { type: string, enum: [metadata, images, cache, transcodes, logs, backups] }
+              path: { type: string }
+              size_bytes: { type: integer }
+              files: { type: integer }
+              partial: { type: boolean }
+        database_bytes: { type: integer }
+        data: { $ref: "#/components/schemas/AdminVolume" }
+        libraries:
+          type: array
+          items: { $ref: "#/components/schemas/AdminVolume" }
+    AdminVolume:
+      type: object
+      required: [path, readable, free_bytes, total_bytes]
+      properties:
+        path: { type: string }
+        readable: { type: boolean }
+        free_bytes: { type: integer }
+        total_bytes: { type: integer }
+        library: { type: string }
+    AdminLogEntry:
+      type: object
+      required: [time, level, message]
+      properties:
+        time: { type: string, format: date-time }
+        level: { type: string }
+        module: { type: string }
+        message: { type: string }
+        fields: { type: object, additionalProperties: true }
+    AdminCheck:
+      type: object
+      required: [id, name, status, message]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [ok, warn, fail, skipped] }
+        message: { type: string }
     ChangeTracksRequest:
       type: object
       properties:

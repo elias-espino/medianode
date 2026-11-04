@@ -429,6 +429,9 @@ func TestFFmpegMuerto(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := f.job("s5")
+	if f.m.Failures() != 0 {
+		t.Fatalf("Failures = %d antes de fallar nada", f.m.Failures())
+	}
 	if err := j.cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
@@ -439,6 +442,9 @@ func TestFFmpegMuerto(t *testing.T) {
 			if e.Name == "transcode.failed" {
 				if e.Data["job_id"] != j.id || !e.AdminOnly {
 					t.Fatalf("%+v", e)
+				}
+				if f.m.Failures() != 1 {
+					t.Fatalf("Failures = %d, se esperaba 1", f.m.Failures())
 				}
 				return
 			}

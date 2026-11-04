@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -96,6 +97,7 @@ type JobInfo struct {
 	Segment      int // Último segmento terminado.
 	PositionUS   int64
 	StartedAt    time.Time
+	Bandwidth    int // bit/s aproximados que entrega la sesión.
 }
 
 type job struct {
@@ -137,6 +139,8 @@ type Manager struct {
 	bus       *events.Bus
 	log       zerolog.Logger
 	admission *Admission
+
+	failures atomic.Int64 // Trabajos de FFmpeg que terminaron con error desde el arranque.
 
 	mu      sync.Mutex
 	streams map[string]*stream
@@ -699,6 +703,7 @@ func (m *Manager) wait(st *stream, j *job) {
 		}
 		tail := j.stderr.String()
 		code, msg = &c, &tail
+		m.failures.Add(1)
 		m.log.Error().Err(err).Str("job_id", j.id).Str("stderr", tail).Msg("FFmpeg terminó con error")
 		m.bus.Publish(events.Event{Name: "transcode.failed", AdminOnly: true, Data: map[string]any{
 			"job_id": j.id, "session_id": st.plan.SessionID, "error_code": c,
@@ -802,6 +807,10 @@ func (m *Manager) Restream(ctx context.Context, p Plan) error {
 	return nil
 }
 
+// Failures devuelve cuántos trabajos de FFmpeg han terminado con error desde que
+// arrancó el servidor.
+func (m *Manager) Failures() int64 { return m.failures.Load() }
+
 // Jobs devuelve los trabajos activos.
 func (m *Manager) Jobs() []JobInfo {
 	m.mu.Lock()
@@ -817,6 +826,7 @@ func (m *Manager) Jobs() []JobInfo {
 			out = append(out, JobInfo{
 				ID: j.id, SessionID: st.plan.SessionID, Kind: st.plan.Kind, Encoder: string(j.encoder),
 				StartSegment: j.startSeg, Segment: m.current(st), PositionUS: j.positionUS, StartedAt: j.started,
+				Bandwidth: st.plan.Variant.Bandwidth,
 			})
 		}
 		st.mu.Unlock()

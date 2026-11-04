@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "./api";
-import { Alert, Spinner, errorText } from "./ui";
+import { api, ApiError, type MediaFile } from "./api";
+import { detectProfile } from "./platform/capabilities";
+import { Alert, Spinner, errorText, formatBytes } from "./ui";
 
 // Reproductor de prueba del panel: Direct Play en <video> y HLS (hls.js, o el
 // HLS nativo de Safari). Envía heartbeats, cambia de audio y de subtítulos
@@ -27,7 +28,13 @@ interface Track {
   codec: string | null;
   forced: boolean;
   title: string | null;
+  height?: number | null;
 }
+
+// Cuántas veces seguidas se reanuda sola una sesión caducada antes de rendirse:
+// un servidor que las cierra al momento no debe provocar un bucle.
+const MAX_AUTO_RESUMES = 3;
+const AUTO_RESUME_WINDOW_MS = 60_000;
 
 interface ExternalSubtitle {
   id: string;
@@ -66,6 +73,13 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [versions, setVersions] = useState<{ id: string; label: string }[]>([]);
+  // Versión pedida (null: la que elija el servidor) y contador que fuerza una
+  // sesión nueva, para cambiar de versión o reanudar tras caducar.
+  const [fileId, setFileId] = useState<string | null>(null);
+  const [epoch, setEpoch] = useState(0);
+  const resumeMs = useRef<number | null>(null);
+  const resumes = useRef<number[]>([]);
   const [audios, setAudios] = useState<Track[]>([]);
   const [subtitles, setSubtitles] = useState<Track[]>([]);
   const [external, setExternal] = useState<ExternalSubtitle[]>([]);
@@ -77,6 +91,24 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
   useEffect(() => {
     let timer: number | undefined;
     let closed = false;
+    setSession(null);
+    setError(null);
+    current.current = null;
+
+    // La sesión caducó (el servidor la cerró por inactividad o se reinició):
+    // se abre otra en el mismo punto, salvo que ocurra una y otra vez.
+    const resume = (atSeconds: number) => {
+      const now = Date.now();
+      resumes.current = resumes.current.filter((t) => now - t < AUTO_RESUME_WINDOW_MS);
+      if (resumes.current.length >= MAX_AUTO_RESUMES) {
+        setError("La sesión caducó varias veces seguidas. Cierra y vuelve a abrir el reproductor.");
+        return;
+      }
+      resumes.current.push(now);
+      resumeMs.current = Math.round(atSeconds * 1000);
+      setNotice("La sesión había caducado; se ha reanudado donde ibas.");
+      setEpoch((n) => n + 1);
+    };
 
     const beat = (state?: "playing" | "paused") => {
       const v = video.current;
@@ -85,7 +117,7 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       api
         .patch(`/playback/sessions/${s.session_id}`, { state: state ?? (v.paused ? "paused" : "playing"), position_ms: Math.round(v.currentTime * 1000) })
         .catch((e) => {
-          if (e instanceof ApiError && e.code === "SESSION_EXPIRED") setError("La sesión ha caducado. Cierra y vuelve a abrir el reproductor.");
+          if (e instanceof ApiError && e.code === "SESSION_EXPIRED" && !closed) resume(v.currentTime);
         });
     };
     const close = () => {
@@ -99,8 +131,17 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       });
     };
 
-    api
-      .post<Session>("/playback/sessions", { media_item_id: itemId, client_profile: { platform: "web", protocols: ["http", "hls"] } })
+    const startMs = resumeMs.current;
+    resumeMs.current = null;
+    detectProfile()
+      .then((profile) =>
+        api.post<Session>("/playback/sessions", {
+          media_item_id: itemId,
+          media_file_id: fileId ?? undefined,
+          client_profile: profile,
+          start_position_ms: startMs ?? undefined,
+        }),
+      )
       .then((s) => {
         if (closed) return;
         current.current = s;
@@ -110,8 +151,14 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
         void Promise.all([
           api.get<Track[]>(`/media/${itemId}/streams`).catch(() => [] as Track[]),
           api.get<ExternalSubtitle[]>(`/media/${itemId}/subtitles`).catch(() => [] as ExternalSubtitle[]),
-        ]).then(([streams, ext]) => {
+          api.get<MediaFile[]>(`/media/${itemId}/files`).catch(() => [] as MediaFile[]),
+        ]).then(([streams, ext, files]) => {
           if (closed) return;
+          setVersions(
+            files
+              .filter((f) => f.probe_status === "done" && !f.missing_since)
+              .map((f) => ({ id: f.id, label: versionLabel(f, streams.find((t) => t.file_id === f.id && t.type === "video")) })),
+          );
           setAudios(streams.filter((t) => t.file_id === s.media_file_id && t.type === "audio"));
           setSubtitles(streams.filter((t) => t.file_id === s.media_file_id && t.type === "subtitle"));
           setExternal(ext.filter((t) => t.file_id === s.media_file_id));
@@ -139,7 +186,15 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       close();
       closed = true;
     };
-  }, [itemId]);
+  }, [itemId, fileId, epoch]);
+
+  // Otra versión del mismo elemento es otro archivo: sesión nueva, en el mismo
+  // punto.
+  const changeVersion = (id: string) => {
+    resumeMs.current = Math.round((video.current?.currentTime ?? 0) * 1000);
+    setNotice(null);
+    setFileId(id);
+  };
 
   // HLS: hls.js donde hay Media Source Extensions; Safari lo reproduce solo.
   const hlsUrl = session && session.stream_url.includes(".m3u8") ? session.stream_url : null;
@@ -217,8 +272,20 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       </div>
       {error && <Alert>{error}</Alert>}
       {!session && !error && <Spinner label="Preparando la reproducción…" />}
-      {session && (audios.length > 1 || subtitles.length + external.length > 0) && (
+      {session && (versions.length > 1 || audios.length > 1 || subtitles.length + external.length > 0) && (
         <div className="player-tracks">
+          {versions.length > 1 && (
+            <label>
+              Versión
+              <select value={session.media_file_id} disabled={busy} onChange={(e) => changeVersion(e.target.value)}>
+                {versions.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {audios.length > 1 && (
             <label>
               Audio
@@ -273,6 +340,15 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       </video>
     </section>
   );
+}
+
+function versionLabel(f: MediaFile, video: Track | undefined): string {
+  const parts: string[] = [];
+  if (video?.height) parts.push(`${video.height}p`);
+  if (f.container) parts.push(f.container.toUpperCase());
+  if (f.file_size !== null) parts.push(formatBytes(f.file_size));
+  if (parts.length === 0) parts.push(f.relative_path?.split(/[\\/]/).pop() ?? "Versión");
+  return parts.join(" · ");
 }
 
 function explain(e: ApiError): string {

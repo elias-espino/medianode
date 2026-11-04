@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -75,6 +76,7 @@ type Session struct {
 	LastHeartbeat   time.Time // Cero si aún no llegó ninguno.
 	LastActivity    time.Time
 	EndedAt         *time.Time
+	ClientIP        string
 
 	dirty bool // Hay posición sin volcar.
 }
@@ -283,6 +285,9 @@ func (m *Manager) fromRow(ctx context.Context, row sqlc.PlaybackSession) (*Sessi
 		Mode: row.PlaybackMode, Status: Status(row.Status), StartPositionMS: row.StartPositionMs,
 		PositionMS: row.PositionMs, DurationMS: row.DurationMs,
 	}
+	if row.ClientIp != nil {
+		s.ClientIP = *row.ClientIp
+	}
 	if row.UserID != nil {
 		s.UserID = *row.UserID
 	}
@@ -343,7 +348,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Session, error) 
 		ID: id, ClientKind: p.ClientKind, UserID: p.UserID, DeviceID: p.DeviceID,
 		ItemID: p.ItemID, FileID: p.FileID, LibraryID: target.LibraryID, Title: target.Title,
 		Mode: p.Mode, Status: Initializing, StartPositionMS: p.StartPositionMS, PositionMS: p.StartPositionMS,
-		DurationMS: duration, StartedAt: now, LastActivity: now,
+		DurationMS: duration, StartedAt: now, LastActivity: now, ClientIP: p.ClientIP,
 	}
 	nowStr := database.FormatTime(now)
 	err = m.db.Q.CreateSession(ctx, sqlc.CreateSessionParams{
@@ -729,6 +734,19 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		errs = append(errs, m.finish(ctx, id, false))
 	}
 	return errors.Join(errs...)
+}
+
+// Snapshots devuelve una copia de cada sesión activa, de la más antigua a la
+// más reciente.
+func (m *Manager) Snapshots() []Session {
+	m.mu.Lock()
+	out := make([]Session, 0, len(m.active))
+	for _, s := range m.active {
+		out = append(out, *s)
+	}
+	m.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
+	return out
 }
 
 // Active devuelve cuántas sesiones hay activas.

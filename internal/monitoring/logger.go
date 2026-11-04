@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	logFileName   = "medianode.log"
+	// LogFileName es el archivo de log dentro del directorio de logs.
+	LogFileName   = "medianode.log"
 	logMaxSizeMB  = 50
 	logMaxBackups = 5
 	logMaxAgeDays = 30
@@ -38,7 +39,7 @@ func NewLogger(cfg LogConfig) (zerolog.Logger, io.Closer, error) {
 	}
 
 	file := &lumberjack.Logger{
-		Filename:   filepath.Join(cfg.Dir, logFileName),
+		Filename:   filepath.Join(cfg.Dir, LogFileName),
 		MaxSize:    logMaxSizeMB,
 		MaxBackups: logMaxBackups,
 		MaxAge:     logMaxAgeDays,

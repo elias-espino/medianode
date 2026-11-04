@@ -3,10 +3,12 @@ package handlers
 import (
 	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 
+	"medianode/internal/admin"
 	"medianode/internal/api"
 	"medianode/internal/api/dto"
 	"medianode/internal/core"
@@ -15,11 +17,83 @@ import (
 	"medianode/internal/transcoding"
 )
 
-// Admin atiende /admin/transcodes. Va detrás de RequireRole(admin).
+// Admin atiende /admin/*. Va detrás de RequireRole(admin).
 type Admin struct {
 	Transcoder *transcoding.Manager
 	Sessions   *sessions.Manager
+	Service    *admin.Service
 	Log        zerolog.Logger
+}
+
+// System devuelve el resumen del servidor y del equipo.
+func (h *Admin) System(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.System(r.Context()))
+}
+
+// Metrics devuelve las métricas de §22.2.
+func (h *Admin) Metrics(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.MetricsNow(r.Context()))
+}
+
+// ActiveSessions lista las sesiones de reproducción activas de todos los
+// usuarios.
+func (h *Admin) ActiveSessions(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.SessionList(r.Context()))
+}
+
+// Network devuelve la configuración de red y las direcciones del servidor.
+func (h *Admin) Network(w http.ResponseWriter, _ *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.Network())
+}
+
+// Storage devuelve el uso de disco.
+func (h *Admin) Storage(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.StorageNow(r.Context()))
+}
+
+// Logs devuelve las últimas líneas del log, filtradas.
+func (h *Admin) Logs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	lines := 200
+	if v := q.Get("lines"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > admin.MaxLogLines {
+			api.WriteError(w, r, core.ErrValidation("lines debe estar entre 1 y "+strconv.Itoa(admin.MaxLogLines)))
+			return
+		}
+		lines = n
+	}
+	level := q.Get("level")
+	if level != "" && !admin.ValidLevel(level) {
+		api.WriteError(w, r, core.ErrValidation("level no es un nivel de log"))
+		return
+	}
+	text := q.Get("q")
+	if len(text) > 200 {
+		api.WriteError(w, r, core.ErrValidation("q es demasiado largo"))
+		return
+	}
+	entries, err := h.Service.Logs(lines, level, text)
+	if err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, entries)
+}
+
+// Settings devuelve la configuración efectiva, sin secretos.
+func (h *Admin) Settings(w http.ResponseWriter, r *http.Request) {
+	s, err := h.Service.Settings()
+	if err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, s)
+}
+
+// SystemCheck ejecuta el diagnóstico de §19.1.
+func (h *Admin) SystemCheck(w http.ResponseWriter, r *http.Request) {
+	api.WriteJSON(w, http.StatusOK, h.Service.SystemCheck(r.Context()))
 }
 
 // Transcodes lista los trabajos de FFmpeg activos y el uso de cupos.

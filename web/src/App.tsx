@@ -11,6 +11,8 @@ import { ItemDetail } from "./pages/ItemDetail";
 import { Users } from "./pages/Users";
 import { Metadata } from "./pages/Metadata";
 import { Search } from "./pages/Search";
+import { Catalog } from "./pages/Catalog";
+import { Admin } from "./pages/Admin";
 
 interface Session {
   user: User;
@@ -97,9 +99,12 @@ export function App() {
 
 const nav = [
   { to: "/", label: "Inicio", admin: false },
+  { to: "/movies", label: "Películas", admin: false },
+  { to: "/series", label: "Series", admin: false },
   { to: "/libraries", label: "Bibliotecas", admin: false },
   { to: "/metadata", label: "Metadatos", admin: true },
   { to: "/users", label: "Usuarios", admin: true },
+  { to: "/admin", label: "Administración", admin: true },
 ];
 
 function Shell() {
@@ -122,12 +127,16 @@ function Shell() {
   let page;
   let params: Record<string, string> | null;
   if (path === "/") page = <Dashboard />;
+  else if (path === "/movies") page = <Catalog kind="movies" />;
+  else if (path === "/series") page = <Catalog kind="tv" />;
   else if (path === "/libraries") page = <Libraries />;
   else if ((params = match("/libraries/:id", path))) page = <LibraryBrowse key={params.id} id={params.id} />;
   else if ((params = match("/media/:id", path))) page = <ItemDetail key={params.id} id={params.id} />;
   else if (path === "/search") page = <Search key={query.get("q")} q={query.get("q") ?? ""} />;
   else if (path === "/users" && isAdmin) page = <Users />;
   else if (path === "/metadata" && isAdmin) page = <Metadata />;
+  else if (path === "/admin" && isAdmin) page = <Admin tab="overview" />;
+  else if ((params = match("/admin/:tab", path)) && isAdmin) page = <Admin tab={params.tab} />;
   else page = <Alert kind="info">Esta página no existe.</Alert>;
 
   const active = (to: string) => (to === "/" ? path === "/" : path === to || path.startsWith(to + "/"));
