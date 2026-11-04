@@ -36,15 +36,23 @@ guardar los datos y ningún servicio externo obligatorio.
 - **Direct Play.** Se entrega el archivo original con `Range` de HTTP, así que
   se puede saltar a cualquier punto. Un motor de decisión ya calcula cuándo un
   cliente necesitaría remux o transcodificación.
+- **Direct Stream y transcodificación por HLS.** Un archivo que el navegador no
+  puede reproducir tal cual se remuxa (el vídeo se copia en segmentos MPEG-TS) o
+  se recodifica a H.264/AAC (segmentos fMP4) mientras lo ves, con salto libre.
+  Los trabajos simultáneos tienen límite (`transcoding.max_concurrent_jobs`), el
+  servidor responde `503` con `Retry-After` cuando está lleno, y FFmpeg no
+  sobrevive al servidor en Windows ni en Linux.
 - **Panel web.** Un panel en React incrustado en el binario: asistente de primer
-  arranque, bibliotecas, usuarios, metadatos, búsqueda y un reproductor básico.
+  arranque, bibliotecas, usuarios, metadatos, búsqueda y un reproductor (Direct
+  Play y HLS con hls.js).
 
-**Aún no está:** HLS, remux y transcodificación (en curso), extraer y grabar
-subtítulos en la imagen, tone mapping de HDR, clientes nativos para móvil y
-televisor, DLNA, descubrimiento en la red local, acceso remoto, TLS e
-instaladores. Un archivo que necesite remux o transcodificación se rechaza con
-un error `PLAYBACK_UNSUPPORTED` que explica los motivos. En la práctica, hoy se
-reproduce en el navegador un MP4 con H.264 y AAC.
+**Aún no está:** extraer y grabar subtítulos en la imagen, tone mapping de HDR,
+clientes nativos para móvil y televisor, DLNA, descubrimiento en la red local,
+acceso remoto, TLS e instaladores. El HLS se ha verificado en Chromium con
+hls.js; los reproductores de Safari, iOS y Android no se han probado, y solo se
+ha probado la codificación por software (libx264): los codificadores por
+hardware se detectan pero no están verificados. En macOS, FFmpeg puede quedar
+vivo si el servidor muere de golpe.
 
 ## Requisitos
 
@@ -164,7 +172,7 @@ internal/
   readmodel            consultas del catálogo y la búsqueda
   playback protocol    decisión de reproducción y perfiles de cliente
   sessions events      sesiones, progreso y el bus de eventos
-  ffmpeg transcoding   comandos de FFmpeg, HLS y trabajos (en curso)
+  ffmpeg transcoding   comandos de FFmpeg, HLS y trabajos
   auth authorization   identidad y permisos
   api                  handlers HTTP, rutas, WebSocket
   database             SQLite, migraciones y código de sqlc

@@ -547,7 +547,12 @@ func TestTokenDeStreaming(t *testing.T) {
 	}
 	_, err := f.m.VerifyToken(s.ID, f.m.StreamToken(other.ID))
 	wantCode(t, err, core.CodeNotFound)
-	_, err = f.m.VerifyToken(s.ID, tok[:len(tok)-1]+"A")
+	// Cambiar el último carácter por otro distinto; si ya era "A", poner "B".
+	last := "A"
+	if tok[len(tok)-1:] == last {
+		last = "B"
+	}
+	_, err = f.m.VerifyToken(s.ID, tok[:len(tok)-1]+last)
 	wantCode(t, err, core.CodeNotFound)
 	// El secreto persiste: otro gestor sobre la misma base firma igual.
 	m2 := New(f.db, f.bus, Options{}, zerolog.Nop())

@@ -1,6 +1,6 @@
 # 0003. Seek con playlist sintética y reinicio de FFmpeg
 
-**Estado:** aceptada para hls.js; pendiente en Safari, AVPlayer y Media3\
+**Estado:** aceptada y verificada con hls.js 1.6 en Edge (Chromium); pendiente en Safari, AVPlayer y Media3\
 **Fecha:** 2 de noviembre de 2026\
 **Validación:** V3
 
@@ -34,12 +34,38 @@ dos reinicios (desde 60 s y 114 s). FFmpeg no registró errores.
 
 ## Riesgos abiertos
 
-- `init.mp4` cambia en cada reinicio, aunque mantiene los mismos parámetros
-  de códec. hls.js decodifica con el primero, pero eso no garantiza el mismo
-  comportamiento en AVPlayer o Media3. Si falla, hay que declarar otra
-  `#EXT-X-MAP` con `#EXT-X-DISCONTINUITY`.
+- ~~`init.mp4` cambia en cada reinicio.~~ Resuelto en la Fase 8: ver
+  «Actualización de la Fase 8» más abajo. Con `frag_discont` el init es
+  idéntico.
 - La prueba usó un archivo sintético y `libx264`. Falta repetirla con
   codificadores por hardware, cuyos parámetros pueden cambiar.
 - La precarga de hls.js puede pedir segmentos fuera de la ventana y provocar
   reinicios innecesarios. Hay que ajustar `seek_restart_segments`.
 - No se validó la protección contra FFmpeg huérfano.
+
+## Actualización de la Fase 8
+
+La prueba de arriba usó un `init.mp4` por trabajo y daba por bueno que hls.js
+decodificara con el primero. Al llevarlo al servidor real apareció el fallo
+que ese riesgo anticipaba: el muxer HLS de FFmpeg empieza `tfdt` en cero en
+cada trabajo y guarda el desfase en la lista de edición (`elst`) del `init`.
+Un reproductor que use el `init` del primer trabajo, el único que declara la
+playlist, coloca los segmentos de un reinicio al principio de la línea de
+tiempo.
+
+**Decisión:** pasar `-hls_segment_options movflags=+frag_discont`. Así `tfdt`
+es absoluto y el `init` sale idéntico en cada reinicio, de modo que no hace
+falta una `#EXT-X-MAP` por trabajo ni `#EXT-X-DISCONTINUITY`. Los cortes
+siguen en una rejilla fija gracias a `-force_key_frames`. La decisión completa
+está en el ADR 0006.
+
+Verificación con el binario real, hls.js 1.6.15 y Edge sin interfaz:
+
+| Prueba | Resultado |
+|--------|-----------|
+| Recodificar a 240p (`max_bitrate` bajo), 120 s: salto a 80 s y vuelta a 2 s | Reproduce, sin errores de hls.js |
+| Recodificar clips de 4 s (HEVC y AC3) | Reproduce hasta el final |
+
+Sigue sin probarse en Safari (HLS nativo), AVPlayer ni Media3. Los
+codificadores por hardware no están probados: en el equipo de desarrollo solo
+funciona `libx264`.

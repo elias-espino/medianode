@@ -69,6 +69,8 @@ func TestBuildEncodeRechaza(t *testing.T) {
 		"sin vídeo":                func(p *EncodeParams) { p.Video = -1 },
 		"inicio fuera de rejilla":  func(p *EncodeParams) { p.StartMS = 5000 },
 		"init con ruta":            func(p *EncodeParams) { p.InitName = "../init.mp4" },
+		"init es ..":               func(p *EncodeParams) { p.InitName = ".." },
+		"lista es .":               func(p *EncodeParams) { p.Playlist = "." },
 		"lista absoluta":           func(p *EncodeParams) { p.Playlist = abs(t, "x.m3u8") },
 		"sin bitrate":              func(p *EncodeParams) { p.VideoBitrate = 0 },
 		"segmento inicial erróneo": func(p *EncodeParams) { p.StartSegment = 2 },

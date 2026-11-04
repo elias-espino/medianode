@@ -90,6 +90,31 @@ func (x *Indexer) Request(fileID, path string, size int64, modifiedAt string) {
 	}
 }
 
+// Wait pide el índice y espera hasta timeout a que esté. Devuelve nil si no
+// llega a tiempo: la sesión usa entonces la playlist EVENT, sin bloquear más.
+func (x *Indexer) Wait(ctx context.Context, fileID, path string, size int64, modifiedAt string, timeout time.Duration) *Index {
+	if idx := x.Get(fileID, size, modifiedAt); idx != nil {
+		return idx
+	}
+	x.Request(fileID, path, size, modifiedAt)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-deadline.C:
+			return x.Get(fileID, size, modifiedAt)
+		case <-tick.C:
+			if idx := x.Get(fileID, size, modifiedAt); idx != nil {
+				return idx
+			}
+		}
+	}
+}
+
 // Name implementa lifecycle.Component.
 func (x *Indexer) Name() string { return "keyframes" }
 

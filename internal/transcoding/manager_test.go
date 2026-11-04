@@ -276,6 +276,60 @@ func TestCopiarSinIndice(t *testing.T) {
 	}
 }
 
+// Sin índice, la primera petición de la playlist no puede recibir una EVENT
+// vacía: los reproductores la rechazan. Media espera al primer segmento.
+func TestMediaSinIndiceNoDevuelveListaVacia(t *testing.T) {
+	tl := needTools(t)
+	f := newManager(t, tl)
+	src := fixture(t, "seek_120s_h264.mkv")
+	err := f.m.Prepare(context.Background(), Plan{
+		SessionID: "s4", FileID: "f4", Path: src, DurationUS: 120_023_000, Kind: Light, VideoIndex: 0, AudioIndex: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	media, err := f.m.Media("s4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Vuelve en cuanto hay un segmento, no al agotar el plazo de espera.
+	if d := time.Since(start); d > 8*time.Second {
+		t.Fatalf("Media tardó %s", d)
+	}
+	if !strings.Contains(string(media), "#EXTINF") || !strings.Contains(string(media), "seg_00000.ts") {
+		t.Fatalf("playlist sin segmentos:\n%s", media)
+	}
+}
+
+// Si FFmpeg falla, la playlist EVENT no se cierra con ENDLIST: el cliente
+// creería que el vídeo termina ahí.
+func TestMediaDeTrabajoFallidoNoLlevaEndlist(t *testing.T) {
+	tl := needTools(t)
+	f := newManager(t, tl)
+	err := f.m.Prepare(context.Background(), Plan{
+		SessionID: "s7", FileID: "f7", Path: filepath.Join(t.TempDir(), "no-existe.mkv"), DurationUS: 60_000_000,
+		Kind: Light, VideoIndex: 0, AudioIndex: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for !isDone(f.job("s7")) {
+		if time.Now().After(deadline) {
+			t.Fatal("el trabajo no terminó")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	media, err := f.m.Media("s7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(media), "#EXT-X-ENDLIST") {
+		t.Fatalf("un trabajo fallido no cierra la playlist:\n%s", media)
+	}
+}
+
 // 20 saltos seguidos no dejan procesos huérfanos.
 func TestVeinteSaltosSinHuerfanos(t *testing.T) {
 	tl := needTools(t)

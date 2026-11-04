@@ -212,7 +212,7 @@ func BuildEncode(p EncodeParams) ([]string, error) {
 		// desfase en la lista de edición de su init: un reproductor que use el
 		// init del primer trabajo, el único que declara la playlist, colocaría
 		// los segmentos de un reinicio al principio. Con él, tfdt es absoluto
-		// y el init sale idéntico en cada reinicio (ADR 0005).
+		// y el init sale idéntico en cada reinicio (ADR 0006).
 		"-hls_segment_options", "movflags=+frag_discont",
 		"-start_number", strconv.Itoa(p.StartSegment),
 		"-hls_segment_filename", "seg_%05d.m4s",
@@ -270,5 +270,5 @@ func BuildCopy(p CopyParams) ([]string, error) {
 
 // safeName exige un nombre de archivo simple dentro del directorio de trabajo.
 func safeName(s string) bool {
-	return s != "" && filepath.Base(s) == s && filepath.IsLocal(s) && !strings.ContainsAny(s, `/\:`)
+	return s != "" && s != "." && filepath.Base(s) == s && filepath.IsLocal(s) && !strings.ContainsAny(s, `/\:`)
 }

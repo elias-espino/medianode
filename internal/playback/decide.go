@@ -179,7 +179,7 @@ func decide(in Input, allowEmbedded bool) Decision {
 }
 
 // Códecs que admite cada contenedor de salida HLS. Copiando el vídeo, los
-// segmentos son MPEG-TS; recodificándolo, fMP4 (ADR 0005 de la Fase 8).
+// segmentos son MPEG-TS; recodificándolo, fMP4 (ADR 0006).
 var (
 	tsVideo   = []string{"h264", "hevc"}
 	tsAudio   = []string{"aac", "ac3", "eac3", "mp3"}

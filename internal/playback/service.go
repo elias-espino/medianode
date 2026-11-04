@@ -226,6 +226,10 @@ func (s *Service) CreateSession(ctx context.Context, actor authorization.Actor, 
 }
 
 // plan traduce la decisión al trabajo de FFmpeg.
+// indexWait es lo máximo que la creación de una sesión espera al índice de
+// keyframes de un archivo que aún no lo tiene.
+const indexWait = 8 * time.Second
+
 func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, kind transcoding.JobKind,
 	c protocol.ClientProfile, req Request) (transcoding.Plan, error) {
 	loc, err := s.db.R.GetFileLocation(ctx, o.file.ID)
@@ -256,11 +260,10 @@ func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, ki
 		codecs = append(codecs, encodedCodecs(p.Height))
 	} else {
 		size, mod := deref64(file.FileSize), deref(file.ModifiedAt)
-		p.Keyframes = s.Indexer.Get(o.file.ID, size, mod)
-		if p.Keyframes == nil {
-			// Sin índice esta sesión usa una playlist EVENT; la siguiente ya lo tendrá.
-			s.Indexer.Request(o.file.ID, p.Path, size, mod)
-		}
+		// Se espera un poco al índice de un archivo nuevo: sin él la sesión usa
+		// una playlist EVENT, peor para el salto. Si no llega, la siguiente
+		// sesión ya lo tendrá.
+		p.Keyframes = s.Indexer.Wait(ctx, o.file.ID, p.Path, size, mod, indexWait)
 		v := o.tracks.Video
 		p.Variant = transcoding.Variant{Bandwidth: int(max(deref64(o.file.Bitrate), 1)), Width: int(deref64(v.Width)), Height: int(deref64(v.Height))}
 		codecs = append(codecs, videoCodecs(v))

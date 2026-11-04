@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -119,9 +120,14 @@ func TestArrancaRespondeYApagaConCodigoCero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
 	var body map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	err = json.NewDecoder(resp.Body).Decode(&body)
+	// Leer hasta el final y cerrar antes de apagar: una conexión con el cuerpo
+	// a medias cuenta como activa y hace esperar a Shutdown.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	http.DefaultClient.CloseIdleConnections()
+	if err != nil {
 		t.Fatal(err)
 	}
 	if body["version"] != version {
@@ -132,7 +138,8 @@ func TestArrancaRespondeYApagaConCodigoCero(t *testing.T) {
 	select {
 	case code := <-done:
 		if code != exitOK {
-			t.Fatalf("código = %d", code)
+			logFile, _ := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(path)), "logs", "medianode.log"))
+			t.Fatalf("código = %d\nsalida: %s\nlog: %s", code, out.String(), logFile)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("el servidor no se detuvo")

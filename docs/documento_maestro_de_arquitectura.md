@@ -18,7 +18,7 @@ multiplataforma
   Nombre                              MediaNode --- Technical Design
                                       Document
 
-  Versión                             1.7
+  Versión                             1.8
 
   Estado                              Propuesta técnica de referencia
                                       para iniciar el desarrollo
@@ -1448,6 +1448,33 @@ No asumir que HLS es obligatorio para todos los clientes. Direct Play
 puede entregar el archivo original por HTTP con soporte correcto de
 Range Requests.
 
+**Contenedor de los segmentos (implementado en la Fase 8, ADR 0006):**
+
+  -----------------------------------------------------------------------
+  Vídeo         Segmentos             Muxer de FFmpeg   Playlist
+  ------------- --------------------- ----------------- -----------------
+  Recodificar   fMP4 (`init.mp4` +    `hls`             VOD sintética,
+                `.m4s`)                                 rejilla fija
+
+  Copiar        MPEG-TS (`.ts`)       `segment`         VOD sintética
+                                                        desde el índice de
+                                                        keyframes; `EVENT`
+                                                        sin índice
+  -----------------------------------------------------------------------
+
+-   Al recodificar, `movflags=+frag_discont` hace que `tfdt` sea absoluto
+    y que el `init.mp4` sea idéntico en cada reinicio; una sola
+    `EXT-X-MAP` sirve para toda la sesión.
+-   Al copiar, los cortes se pasan a FFmpeg de forma explícita, en
+    microsegundos y relativos al salto, para que un reinicio produzca los
+    mismos segmentos que la pasada completa.
+-   El servidor recodifica lo que el contenedor de salida no puede llevar
+    aunque el cliente lo admita (VP9 en MPEG-TS, Opus en MPEG-TS).
+-   El preset `web` declara solo `http`: un cliente con hls.js debe
+    declarar `protocols: ["http", "hls"]`.
+-   Verificado con hls.js 1.6 en Chromium. Pendiente en Safari, AVPlayer y
+    Media3.
+
 ## 10.5 Hardware acceleration
 
 Detección y perfiles por sistema:
@@ -1515,6 +1542,21 @@ se incorporará si los benchmarks lo justifican.
 La duración de segmento y la distancia que obliga a reiniciar FFmpeg se
 configuran con `transcoding.segment_seconds` y
 `transcoding.seek_restart_segments`.
+
+**Índice de keyframes y playlist `EVENT`:** crear una sesión que copia el
+vídeo pide el índice y espera hasta 8 s a que exista. Si no llega (un
+archivo enorme que aún no se ha indexado), la sesión usa una playlist
+`EVENT` con seek limitado a lo ya generado, y la petición de la playlist
+espera al primer segmento para no devolver una lista vacía. La siguiente
+sesión del mismo archivo ya tiene el índice (ADR 0004).
+
+**Reinicios y orfandad:** se reinicia FFmpeg si no hay trabajo activo, si
+el segmento pedido es anterior al inicio del trabajo, o si está más allá de
+`seek_restart_segments` del segmento en curso. El trabajo reiniciado lleva
+un límite de tiempo (`-t`) para no reescribir segmentos que ya existen.
+Si el servidor muere, FFmpeg muere con él: Job Object con
+`KILL_ON_JOB_CLOSE` en Windows y `Pdeathsig` en Linux. **En macOS no hay
+supervisión todavía**: un fallo del servidor puede dejar FFmpeg vivo.
 
 ## 10.8 HDR y tone mapping
 
@@ -2321,6 +2363,7 @@ transcoding:
   seek_restart_segments: 5
   hardware_acceleration: "auto"
   cleanup_after_minutes: 30
+  max_disk_gb: 20
 
 sessions:
   heartbeat_timeout_seconds: 90

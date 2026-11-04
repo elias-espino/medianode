@@ -1,8 +1,8 @@
 # MediaNode — Plan de trabajo
 
-**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.7\
-**Fecha:** 3 de noviembre de 2026\
-**Estado del repositorio:** alfa. Fases 0 a 7 completas y verificadas; la 8 (HLS y transcodificación) está en curso
+**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.8\
+**Fecha:** 4 de noviembre de 2026\
+**Estado del repositorio:** alfa. Fases 0 a 8 completas y verificadas (con las salvedades de la Fase 8); la 9 (subtítulos, audio y HDR) es la siguiente
 
 Este plan convierte la arquitectura en trabajo ordenado, desde el diseño
 de tablas hasta la distribución. El DDL completo vive en la sección 6.2
@@ -1699,33 +1699,102 @@ playlist `EVENT` y el seek queda limitado a lo ya generado.
 
 ### Tareas
 
-- [ ] `internal/ffmpeg`, con pruebas de argumentos sin invocar FFmpeg.
-- [ ] `Admission` y su reserva en `CreateSession` antes de crear sesión.
-- [ ] `Manager.Start`, `Restart`, `StopSession` y supervisión.
-- [ ] Playlists y handler de `/stream/session/{id}/{token}/{path}`, que
+- [x] `internal/ffmpeg`, con pruebas de argumentos sin invocar FFmpeg.
+- [x] `Admission` y su reserva en `CreateSession` antes de crear sesión.
+- [x] `Manager` (`Prepare`, `File`, reinicios en `waitSegment`,
+      `OnSessionEnded`) y supervisión del proceso: Job Object en Windows y
+      `Pdeathsig` en Linux. **macOS no tiene supervisión** (§12.5).
+- [x] Playlists y handler de `/stream/session/{id}/{token}/{path}`, que
       solo acepta nombres de una lista permitida.
-- [ ] Detección de aceleración para NVENC, QSV, VAAPI, AMF y
-      VideoToolbox.
-- [ ] Recolector y cuota de `data/transcodes`.
-- [ ] `/admin/transcodes`, `/admin/transcodes/{id}/cancel` y eventos.
-- [ ] Benchmarks por perfil y primer default de `max_concurrent_jobs`.
+- [x] Detección de aceleración para NVENC, QSV, VAAPI, AMF y
+      VideoToolbox. Se detectan y se prueban con `TestEncoder`, pero **solo
+      `libx264` se ha ejecutado de verdad**: ningún codificador por hardware
+      está verificado.
+- [x] Recolector y cuota de `data/transcodes` (`transcoding.max_disk_gb`).
+- [x] `/admin/transcodes`, `/admin/transcodes/{id}/cancel` y eventos
+      (`transcode.started`, `transcode.progress`, `transcode.failed`). El
+      panel todavía no tiene pantalla para ellos.
+- [x] Reproductor del panel con hls.js (carga diferida) y perfil
+      `protocols: ["http", "hls"]`.
+- [x] Benchmarks y primer default de `max_concurrent_jobs` (ver más abajo).
 
 ### Pruebas
 
-- Saltar hacia adelante reinicia FFmpeg y reproduce en menos de 5 s.
-- Saltar a una zona ya generada no reinicia.
-- 20 saltos seguidos no dejan procesos huérfanos.
-- La posición informada coincide con la del archivo tras cada salto.
-- Sin cupo, se responde 503 con `Retry-After` y no se crea sesión.
-- Un cambio de calidad no pierde el cupo.
-- Matar FFmpeg termina en `transcode.failed`, con diagnóstico.
-- Matar el servidor no deja FFmpeg vivo.
-- Rutas con `../` en el segmento se rechazan.
-- Un nombre de archivo con caracteres especiales no altera el comando.
+- [x] Saltar hacia adelante reinicia FFmpeg y reproduce en menos de 5 s
+      (`TestRecodificarConSaltos`; en Edge con hls.js, salto de 2 s a 80 s).
+- [x] Saltar a una zona ya generada no reinicia.
+- [x] 20 saltos seguidos no dejan procesos huérfanos
+      (`TestVeinteSaltosSinHuerfanos`).
+- [x] La posición informada coincide con la del archivo tras cada salto.
+- [x] Sin cupo, se responde 503 con `Retry-After` y no se crea sesión.
+- [~] Un cambio de calidad no pierde el cupo: el cupo es de la sesión y
+      `Reserve` es idempotente (probado), pero el API no expone todavía el
+      cambio de calidad en una sesión viva.
+- [x] Matar FFmpeg termina en `transcode.failed`, con diagnóstico.
+- [~] Matar el servidor no deja FFmpeg vivo: **verificado en Windows**
+      (`taskkill /F` con FFmpeg en marcha, 0 procesos después). `Pdeathsig`
+      en Linux no tiene prueba propia; macOS no tiene mecanismo.
+- [x] Rutas con `../` en el segmento se rechazan.
+- [x] Un nombre de archivo con caracteres especiales no altera el comando
+      (`file:` delante de la entrada, nombres de salida validados).
+
+### Resultado de la Fase 8
+
+**Verificación con el binario real** (`medianode-server`, FFmpeg 9.0.2,
+fixtures de `testdata/fixtures`):
+
+- 27 comprobaciones de extremo a extremo (sesión, master, playlists, init,
+  segmentos, `ffprobe` de lo servido, salto, 503, cierre de sesiones y
+  muerte del servidor).
+- hls.js 1.6.15 en Edge sin interfaz: Direct Stream de 120 s con salto a
+  60 s y vuelta; recodificación a 240p con salto a 80 s y vuelta; clips con
+  AC3 y HEVC. Solo se vio un aviso no fatal, `bufferSeekOverHole`.
+- El navegador integrado del escritorio de Claude rechaza las URL `blob:`
+  de MSE, así que no sirve para probar hls.js; las pruebas se hicieron con
+  Edge.
+
+**Defectos que solo apareció al probar de verdad:**
+
+1. El primer archivo sin índice de keyframes devolvía una playlist `EVENT`
+   vacía, que los reproductores rechazan. Ahora la sesión espera al índice
+   hasta 8 s y `Media()` espera al primer segmento (ADR 0004).
+2. `safeName(".")` se aceptaba como nombre de salida.
+
+**Pruebas de mutación:** 28 mutantes del código nuevo (admisión, playlists,
+índice, argumentos de FFmpeg, `hlsContainers`, espera del índice). Mueren 26;
+sobreviven 2. El mutante de `Indexer.Wait` que devuelve `nil` al agotar el
+plazo es equivalente (solo omite una última lectura). El que quita la
+condición «hay segmentos» de `Media()` solo se nota si FFmpeg tarda más en
+terminar que en escribir el primer segmento, y con fixtures pequeños el
+trabajo acaba antes.
+
+**Benchmark** (Intel i5-2400, 4 núcleos, libx264 `veryfast`, origen 4K de
+2 s, sin audio; es una medición corta y de una sola máquina):
+
+| Salida | 1 trabajo | 2 a la vez | 4 a la vez |
+|--------|-----------|------------|------------|
+| 1080p | 1,46× tiempo real | 0,77× | 0,34× |
+| 720p | 1,36× | 0,99× | 0,52× |
+| 480p | 1,82× | 1,04× | 0,59× |
+
+Copiar el vídeo cuesta muy poco: 120 s en 0,14 s.
+
+**Default:** `max_concurrent_jobs: 1` y `max_concurrent_light_jobs: 4` se
+mantienen. En un equipo de esta clase, dos recodificaciones simultáneas a
+1080p ya no llegan a tiempo real. Quien tenga más núcleos o codificador por
+hardware puede subirlo.
+
+**Sin verificar:** Safari (HLS nativo), AVPlayer y Media3; codificadores por
+hardware; `Pdeathsig` en Linux; supervisión en macOS; archivos de varios GB
+sobre red.
 
 **Criterio de salida:** cada combinación de contenedor y códec de §23.3
 se reproduce en hls.js, Safari y Media3, con seek libre y sin fugas de
 procesos ni de disco.
+
+**Estado del criterio:** cumplido para hls.js en Chromium con las
+combinaciones de los fixtures (H.264 con AAC y AC3, y HEVC; DTS y 4K no se probaron). **No
+cumplido** para Safari y Media3, que no se han podido probar.
 
 ------------------------------------------------------------------------
 

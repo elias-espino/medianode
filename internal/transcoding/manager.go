@@ -268,8 +268,6 @@ func (m *Manager) Media(sessionID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	st.mu.Lock()
-	defer st.mu.Unlock()
 	if st.segs != nil {
 		init := ""
 		if st.ext == "m4s" {
@@ -277,12 +275,24 @@ func (m *Manager) Media(sessionID string) ([]byte, error) {
 		}
 		return MediaPlaylist(st.segs, st.ext, init), nil
 	}
-	entries, err := readList(filepath.Join(st.dir, listName(st.gen)))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+	// Playlist EVENT: una sin segmentos hace fallar a los reproductores, así
+	// que se espera al primero (o a que el trabajo termine).
+	deadline := time.Now().Add(m.opts.WaitTimeout)
+	for {
+		st.mu.Lock()
+		entries, err := readList(filepath.Join(st.dir, listName(st.gen)))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			st.mu.Unlock()
+			return nil, err
+		}
+		finished := st.job != nil && isDone(st.job)
+		done := finished && st.job.err == nil
+		st.mu.Unlock()
+		if len(entries) > 0 || finished || time.Now().After(deadline) {
+			return EventPlaylist(entries, st.ext, done), nil
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	done := st.job != nil && isDone(st.job) && st.job.err == nil
-	return EventPlaylist(entries, st.ext, done), nil
 }
 
 // File devuelve la ruta de un recurso de la sesión, esperando a que FFmpeg lo

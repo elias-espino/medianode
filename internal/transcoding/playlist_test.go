@@ -27,6 +27,18 @@ func TestEncodeSegments(t *testing.T) {
 
 // Los cortes coinciden con los que FFmpeg produjo en una pasada completa
 // sobre el vídeo de keyframes irregulares medido al diseñar la fase.
+func TestCopySegmentsKeyframeEnLaDuracionNoCreaSegmentoVacio(t *testing.T) {
+	segs := CopySegments([]int64{0, 6_000_000, 12_000_000}, 12_000_000, 6)
+	if len(segs) != 2 || segs[1].DurationUS != 6_000_000 {
+		t.Fatalf("%+v", segs)
+	}
+	for _, s := range segs {
+		if s.DurationUS <= 0 {
+			t.Fatalf("segmento sin duración: %+v", s)
+		}
+	}
+}
+
 func TestCopySegmentsComoFFmpeg(t *testing.T) {
 	kf := []int64{0, 2_520_000, 4_000_000, 9_000_000, 11_200_000, 13_000_000, 19_520_000, 20_000_000, 24_000_000,
 		31_000_000, 32_000_000, 36_520_000, 44_000_000, 45_000_000, 50_120_000, 55_000_000, 58_000_000}

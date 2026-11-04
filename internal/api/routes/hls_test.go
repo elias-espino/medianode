@@ -218,31 +218,17 @@ func TestHLSCopiandoPorAPI(t *testing.T) {
 	if rec = e.get(base+"seg_00000.ts", nil); rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "video/mp2t" || rec.Body.Len() < 1000 {
 		t.Fatalf("segmento: %d", rec.Code)
 	}
+	// Crear la sesión espera al índice de un archivo nuevo (indexWait): la
+	// primera ya recibe la playlist VOD y puede saltar, sin pasar por EVENT.
 	rec = e.get(base+"media.m3u8", nil)
-	if !strings.Contains(rec.Body.String(), "PLAYLIST-TYPE:EVENT") || strings.Contains(rec.Body.String(), "EXT-X-MAP") {
-		t.Fatalf("sin índice, EVENT y sin EXT-X-MAP:\n%s", rec.Body)
-	}
-
-	// El índice se calcula en segundo plano; la siguiente sesión ya usa VOD.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if idx := e.indexer.Get(fileID, m.size, "2026-01-01T00:00:00.000Z"); idx != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("el índice no se calculó")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	rec, second := e.play(own.token, map[string]any{"media_item_id": m.item, "client_profile": hlsProfile})
-	e.want(rec, http.StatusCreated)
-	base2 := strings.TrimSuffix(second["stream_url"].(string), "master.m3u8")
-	rec = e.get(base2+"media.m3u8", nil)
 	if !strings.Contains(rec.Body.String(), "PLAYLIST-TYPE:VOD") || !strings.Contains(rec.Body.String(), "#EXT-X-ENDLIST") ||
-		len(reSeg.FindAllString(rec.Body.String(), -1)) < 10 {
-		t.Fatalf("con índice, VOD:\n%s", rec.Body)
+		strings.Contains(rec.Body.String(), "EXT-X-MAP") || len(reSeg.FindAllString(rec.Body.String(), -1)) < 10 {
+		t.Fatalf("con índice, VOD y sin EXT-X-MAP:\n%s", rec.Body)
 	}
-	if rec = e.get(base2+"seg_00009.ts", nil); rec.Code != http.StatusOK {
+	if idx := e.indexer.Get(fileID, m.size, "2026-01-01T00:00:00.000Z"); idx == nil {
+		t.Fatal("la sesión no esperó al índice")
+	}
+	if rec = e.get(base+"seg_00009.ts", nil); rec.Code != http.StatusOK {
 		t.Fatalf("salto con índice: %d", rec.Code)
 	}
 }

@@ -32,14 +32,22 @@ external services required.
 - **Direct Play.** The original file is served with HTTP `Range`, so seeking
   works. A playback decision engine already works out when a client would need
   remuxing or transcoding.
+- **Direct Stream and transcoding over HLS.** A file the browser cannot play
+  as is gets remuxed (video copied into MPEG-TS segments) or re-encoded to
+  H.264/AAC (fMP4 segments) while you watch, with free seeking. Concurrent jobs
+  are limited (`transcoding.max_concurrent_jobs`), the server answers `503` with
+  `Retry-After` when it is full, and FFmpeg never outlives the server on
+  Windows and Linux.
 - **Web panel.** A React panel embedded in the binary: first-run wizard,
-  libraries, users, metadata, search and a basic player.
+  libraries, users, metadata, search and a player (Direct Play and HLS through
+  hls.js).
 
-**Not done yet:** HLS, remux and transcoding (in progress), subtitle extraction
-and burn-in, HDR tone mapping, native mobile and TV clients, DLNA, discovery on
-the local network, remote access, TLS and installers. A file that needs remuxing
-or transcoding is rejected with a clear `PLAYBACK_UNSUPPORTED` error that lists
-the reasons. In practice, MP4 with H.264 and AAC plays in a browser today.
+**Not done yet:** subtitle extraction and burn-in, HDR tone mapping, native
+mobile and TV clients, DLNA, discovery on the local network, remote access, TLS
+and installers. HLS has been verified in Chromium with hls.js; Safari, iOS and
+Android players are untested, and only software encoding (libx264) has been
+tried: hardware encoders are detected but unverified. On macOS, FFmpeg may stay
+alive if the server is killed.
 
 ## Requirements
 
@@ -156,7 +164,7 @@ internal/
   readmodel            catalog and search queries
   playback protocol    playback decision and client profiles
   sessions events      sessions, progress and the event bus
-  ffmpeg transcoding   FFmpeg commands, HLS and jobs (in progress)
+  ffmpeg transcoding   FFmpeg commands, HLS and jobs
   auth authorization   identity and permissions
   api                  HTTP handlers, routes, WebSocket
   database             SQLite, migrations and sqlc code

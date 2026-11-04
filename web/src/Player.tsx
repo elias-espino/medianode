@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 import { Alert, Spinner, errorText } from "./ui";
 
-// Reproductor de prueba del panel: Direct Play en <video>. Envía heartbeats y
+// Reproductor de prueba del panel: Direct Play en <video> y HLS (hls.js, o el
+// HLS nativo de Safari).  Envía heartbeats y
 // cierra la sesión al salir, para que la URL deje de servir (§12, §16.4).
 
 interface Session {
@@ -59,7 +60,7 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
     };
 
     api
-      .post<Session>("/playback/sessions", { media_item_id: itemId, client_profile: { platform: "web" } })
+      .post<Session>("/playback/sessions", { media_item_id: itemId, client_profile: { platform: "web", protocols: ["http", "hls"] } })
       .then((s) => {
         if (closed) return;
         current = s;
@@ -90,6 +91,36 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
     };
   }, [itemId]);
 
+  // HLS: hls.js donde hay Media Source Extensions; Safari lo reproduce solo.
+  const hlsUrl = session && session.stream_url.includes(".m3u8") ? session.stream_url : null;
+  useEffect(() => {
+    const v = video.current;
+    if (!v || !session || !hlsUrl) return;
+    let destroy: (() => void) | undefined;
+    let cancelled = false;
+    // Import dinámico: Direct Play no descarga hls.js.
+    void import("hls.js").then(({ default: Hls }) => {
+      if (cancelled) return;
+      if (Hls.isSupported()) {
+        const hls = new Hls({ startPosition: session.start_position_ms / 1000 });
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (data.fatal) setError(`Error de reproducción (${data.details}).`);
+        });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(v);
+        destroy = () => hls.destroy();
+      } else if (v.canPlayType("application/vnd.apple.mpegurl")) {
+        v.src = hlsUrl;
+      } else {
+        setError("Este navegador no puede reproducir HLS.");
+      }
+    });
+    return () => {
+      cancelled = true;
+      destroy?.();
+    };
+  }, [session, hlsUrl]);
+
   return (
     <section className="card player" aria-label={`Reproduciendo ${title}`}>
       <div className="library-head">
@@ -106,9 +137,9 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
         controls
         autoPlay
         hidden={!session}
-        src={session?.stream_url}
+        src={hlsUrl ? undefined : session?.stream_url}
         onLoadedMetadata={(e) => {
-          if (session && session.start_position_ms > 0) e.currentTarget.currentTime = session.start_position_ms / 1000;
+          if (session && !hlsUrl && session.start_position_ms > 0) e.currentTarget.currentTime = session.start_position_ms / 1000;
         }}
       >
         {session?.subtitle_url && <track kind="subtitles" src={session.subtitle_url} default label="Subtítulos" />}
