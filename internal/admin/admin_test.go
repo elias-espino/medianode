@@ -2,8 +2,11 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -420,5 +423,48 @@ func TestComprobacionDelPuerto(t *testing.T) {
 	ln.Close()
 	if c := (&Service{Config: cfg}).checkPort(context.Background()); c.Status != CheckFail {
 		t.Errorf("nadie escucha: %+v", c)
+	}
+}
+
+func TestLocalAddressesSoloIPv4NoLoopback(t *testing.T) {
+	old := interfaceAddrs
+	t.Cleanup(func() { interfaceAddrs = old })
+	parse := func(cidr string) net.Addr {
+		ip, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	interfaceAddrs = func() ([]net.Addr, error) {
+		return []net.Addr{
+			parse("192.168.1.22/24"), parse("10.0.0.5/8"), parse("127.0.0.1/8"), parse("169.254.3.4/16"),
+			parse("2001:db8::1/64"), parse("::1/128"), parse("fe80::1/64"), parse("8.8.4.4/32"),
+		}, nil
+	}
+	got := localAddresses("0.0.0.0")
+	want := []string{"10.0.0.5", "192.168.1.22", "8.8.4.4"}
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("direcciones = %v, se esperaba %v (sin IPv6, bucle local ni enlace local)", got, want)
+	}
+	interfaceAddrs = func() ([]net.Addr, error) { return nil, errors.New("sin red") }
+	if got := localAddresses(""); len(got) != 0 {
+		t.Fatalf("sin red: %v", got)
+	}
+}
+
+// El nivel mínimo no distingue mayúsculas.
+func TestLogsNivelSinDistinguirMayusculas(t *testing.T) {
+	dir := t.TempDir()
+	writeLog(t, dir,
+		`{"level":"info","time":"2026-01-01T00:00:01Z","message":"uno"}`,
+		`{"level":"error","time":"2026-01-01T00:00:02Z","message":"dos"}`,
+	)
+	s := &Service{Config: config.Config{Paths: config.Paths{Logs: dir}}}
+	got, err := s.Logs(10, "ERROR", "")
+	if err != nil || len(got) != 1 || got[0].Message != "dos" {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

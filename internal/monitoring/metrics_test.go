@@ -184,3 +184,32 @@ func TestProcessCPUTimeAvanza(t *testing.T) {
 		t.Fatalf("el tiempo de CPU no avanzó: %v -> %v", a, b)
 	}
 }
+
+// El percentil es el del rango más cercano por arriba: con 11 muestras, el p95 es
+// la undécima, no la décima.
+func TestPercentileRedondeaHaciaArriba(t *testing.T) {
+	var d []time.Duration
+	for i := 1; i <= 11; i++ {
+		d = append(d, time.Duration(i)*time.Millisecond)
+	}
+	if got := percentile(d, 0.95); got != 11*time.Millisecond {
+		t.Errorf("p95 de 11 muestras = %v, se esperaba 11ms", got)
+	}
+	if got := percentile(d, 0.5); got != 6*time.Millisecond {
+		t.Errorf("p50 de 11 muestras = %v, se esperaba 6ms", got)
+	}
+	if got := percentile(d[:3], 0.95); got != 3*time.Millisecond {
+		t.Errorf("p95 de 3 muestras = %v", got)
+	}
+}
+
+// El máximo es el histórico, no la última medida.
+func TestMetricsMaximoEsElHistorico(t *testing.T) {
+	m := NewMetrics()
+	m.record("GET /x", 50*time.Millisecond, 200)
+	m.record("GET /x", 5*time.Millisecond, 200)
+	m.record("GET /x", 1*time.Millisecond, 200)
+	if got := m.Latency()[0].MaxMS; got != 50 {
+		t.Fatalf("MaxMS = %v, se esperaba 50", got)
+	}
+}

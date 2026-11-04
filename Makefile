@@ -1,4 +1,4 @@
-.PHONY: generate test test-race lint web build cross fixtures
+.PHONY: generate test test-race lint web build cross release fixtures
 
 VERSION ?= dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
@@ -23,6 +23,11 @@ web:
 
 build: web
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
+
+# Paquetes para Windows, Linux y macOS (amd64 y arm64) y SHA256SUMS, en
+# dist/release. Uso: make release VERSION=v0.1.0
+release: web
+	go run ./scripts/release -version $(VERSION) -out dist/release
 
 cross:
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o dist/windows-amd64/ ./cmd/...

@@ -301,6 +301,9 @@ func nonNil(s []string) []string {
 	return s
 }
 
+// interfaceAddrs es net.InterfaceAddrs; las pruebas lo sustituyen.
+var interfaceAddrs = net.InterfaceAddrs
+
 // localAddresses son las IPv4 por las que se llega al servidor: la propia
 // dirección de enlace si es concreta, o las de las interfaces si escucha en
 // todas.
@@ -310,7 +313,7 @@ func localAddresses(bind string) []string {
 		return []string{bind}
 	}
 	var out []string
-	addrs, err := net.InterfaceAddrs()
+	addrs, err := interfaceAddrs()
 	if err != nil {
 		return out
 	}

@@ -39,6 +39,14 @@ jobs:
         run: |
           npm ci
           npm run build
+          npm test
+      # Los tipos del cliente salen de docs/openapi.yaml: si cambia la API sin
+      # regenerarlos, esto falla en lugar de dejar al panel con tipos viejos.
+      - name: Tipos de la API al día
+        working-directory: web
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/api/schema.d.ts
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist
@@ -59,6 +67,25 @@ jobs:
           path: web/dist
       - name: Compilación cruzada sin CGO
         run: make cross
+
+  # La imagen se construye y arranca de verdad: el Dockerfile se niega a
+  # terminar si el FFmpeg de Alpine no trae ffprobe y libx264, o si es nonfree.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir la imagen
+        run: docker build -t medianode:ci --build-arg VERSION=ci .
+      - name: Arrancarla y comprobar su estado
+        run: |
+          docker run -d --name medianode -p 8420:8420 medianode:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8420/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8420/health
+          curl -fsS http://127.0.0.1:8420/api/v1/server/capabilities
+          docker logs medianode
 
   lint:
     runs-on: ubuntu-latest

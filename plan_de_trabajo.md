@@ -1,8 +1,8 @@
 # MediaNode — Plan de trabajo
 
-**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.9\
+**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.10\
 **Fecha:** 4 de noviembre de 2026\
-**Estado del repositorio:** alfa. Fases 0 a 9 completas y verificadas (con las salvedades de las Fases 8 y 9); la 10 (cliente web y empaquetado) es la siguiente
+**Estado del repositorio:** alfa. Fases 0 a 10 completas y verificadas (con las salvedades de las Fases 8, 9 y 10), **hito H3 alcanzado**: los 14 criterios del MVP pasan en un Windows limpio y en Docker; la 11 (clientes móviles) es la siguiente
 
 Este plan convierte la arquitectura en trabajo ordenado, desde el diseño
 de tablas hasta la distribución. El DDL completo vive en la sección 6.2
@@ -1968,56 +1968,110 @@ web/src/
 └── platform/       player, websocket y almacenamiento
 ```
 
-- [ ] Generar el cliente TypeScript desde `docs/openapi.yaml`.
-- [ ] Sesión con cookie, refresco y protección CSRF.
-- [ ] Inicio, Continuar viendo, Películas, Series, Búsqueda y Detalle.
-- [ ] Selección de versión, audio y subtítulos.
-- [ ] Reproductor: hls.js o `<video>` nativo, heartbeat, pausa, seek y
-      reanudación tras `SESSION_EXPIRED`.
-- [ ] Perfil de capacidades con `canPlayType` y `MediaCapabilities`.
-- [ ] Panel: Dashboard, Sessions, Transcoding, Hardware, Network, Storage,
-      Logs y Settings.
-- [ ] `internal/admin`, con los endpoints `/admin/system`,
-      `/admin/sessions`, `/admin/logs`, `/admin/storage` y
-      `/admin/settings`.
-- [ ] `GET /admin/system-check`, con las comprobaciones de §19.1.
-- [ ] `internal/monitoring`: exponer en el panel las métricas de §22.2.
+- [~] Generar el cliente TypeScript desde `docs/openapi.yaml`: **solo los tipos**
+      (`npm run gen:api`, y el CI falla si no están al día). El cliente HTTP sigue
+      escrito a mano.
+- [x] Sesión con cookie, refresco y protección CSRF (Fase 5).
+- [x] Inicio, Continuar viendo, Películas, Series, Búsqueda y Detalle.
+- [x] Selección de versión, audio y subtítulos.
+- [x] Reproductor: hls.js o `<video>` nativo, heartbeat, pausa, seek y
+      reanudación tras `SESSION_EXPIRED`, y desde el progreso guardado.
+- [x] Perfil de capacidades con `canPlayType` y `MediaCapabilities`.
+- [x] Panel: Resumen, Sesiones, Transcodificación, Hardware, Red,
+      Almacenamiento, Registros, Ajustes (**solo lectura**) y Diagnóstico.
+- [x] `internal/admin`, con los endpoints `/admin/system`, `/admin/metrics`,
+      `/admin/sessions`, `/admin/network`, `/admin/logs`, `/admin/storage` y
+      `/admin/settings`. **Sin `PATCH /admin/settings` ni copias de seguridad.**
+- [x] `GET /admin/system-check`, con las comprobaciones de §19.1 y la de unidades de
+      red de §21.2.
+- [x] `internal/monitoring`: exponer en el panel las métricas de §22.2.
+- [ ] Estructura por capas de §18.2 (`app/`, `features/`, `domain/`, `api/`,
+      `platform/`): **solo `api/` y `platform/`**; las pantallas siguen en `pages/`.
 
 ### Empaquetado inicial
 
-- [ ] `Dockerfile` multietapa con imagen mínima y FFmpeg incluido.
-- [ ] `docker-compose.yml` de ejemplo, con red `host` para el descubrimiento.
-- [ ] Binarios para Windows, Linux y macOS, en `amd64` y `arm64`.
-- [ ] Unidad systemd de ejemplo, con usuario sin privilegios.
-- [ ] Auditar la licencia de la build de FFmpeg que se distribuya.
+- [x] `Dockerfile` multietapa con imagen mínima y FFmpeg incluido (218 MB).
+- [x] `docker-compose.yml` de ejemplo, con red `host` para el descubrimiento (solo Linux).
+- [x] Binarios para Windows, Linux y macOS, en `amd64` y `arm64` (`make release`).
+- [~] Unidad systemd de ejemplo, con usuario sin privilegios: **sin probar en un
+      Linux real**.
+- [x] Auditar la licencia de la build de FFmpeg que se distribuya
+      (`docs/licencias-ffmpeg.md`).
 
 ### Comprobación del MVP
 
-| # | Criterio de §23.5 | Fase |
-|---|-------------------|------|
-| 1 | Instalación sin herramientas de desarrollo | 10 |
-| 2 | Configuración inicial desde navegador | 5 |
-| 3 | Creación y escaneo de bibliotecas | 4 |
-| 4 | Extracción técnica con FFprobe | 4 |
-| 5 | Catálogo de películas y series | 5 |
-| 6 | Login y permisos | 3 |
-| 7 | Direct Play | 7 |
-| 8 | Direct Stream | 8 |
-| 9 | Transcodificación de un perfil | 8 |
-| 10 | Selección de audio y subtítulos | 9 |
-| 11 | Guardado y recuperación de progreso | 6 |
-| 12 | Dos clientes con sesiones independientes | 8 |
-| 13 | Reinicio sin pérdida de catálogo ni progreso | 6 |
-| 14 | Logs útiles para diagnosticar | 1 y 8 |
+| # | Criterio de §23.5 | Fase | En la instalación limpia |
+|---|-------------------|------|--------------------------|
+| 1 | Instalación sin herramientas de desarrollo | 10 | Paquete verificado por su suma; arrancado con un `PATH` sin Go, Node ni Python |
+| 2 | Configuración inicial desde navegador | 5 | Pasa (Windows y Docker) |
+| 3 | Creación y escaneo de bibliotecas | 4 | Pasa |
+| 4 | Extracción técnica con FFprobe | 4 | Pasa |
+| 5 | Catálogo de películas y series | 5 | Pasa (películas; **series sin cubrir** por la herramienta) |
+| 6 | Login y permisos | 3 | Pasa |
+| 7 | Direct Play | 7 | Pasa, con `Range` |
+| 8 | Direct Stream | 8 | Pasa |
+| 9 | Transcodificación de un perfil | 8 | Pasa |
+| 10 | Selección de audio y subtítulos | 9 | Pasa, también en vivo |
+| 11 | Guardado y recuperación de progreso | 6 | Pasa (y arregló un fallo del panel) |
+| 12 | Dos clientes con sesiones independientes | 8 | Pasa, a la vez |
+| 13 | Reinicio sin pérdida de catálogo ni progreso | 6 | Pasa, durante una reproducción |
+| 14 | Logs útiles para diagnosticar | 1 y 8 | Pasa; sin secretos |
 
 ### Pruebas
 
-- Prueba completa en máquina limpia con Docker y con binario.
-- Chrome, Firefox, Edge y Safari.
-- Dos sesiones simultáneas, una con Direct Play y otra con transcodificación.
-- Reinicio durante una reproducción, con reanudación desde el progreso.
+- [x] Prueba completa en máquina limpia con Docker y con binario
+      (`scripts/acceptance`): **30 de 30 en el binario de Windows y 30 de 30 en
+      Docker**. La «máquina limpia» de Windows es una carpeta nueva y un `PATH`
+      mínimo en el mismo equipo, no un equipo distinto.
+- [~] Chrome, Firefox, Edge y Safari: **Edge y Chrome 156** (sin interfaz) reproducen
+      por HLS con hls.js, en Direct Stream y recodificando, con saltos y sin errores
+      fatales (Chrome, ninguno; Edge, un aviso `bufferSeekOverHole`), y el navegador
+      integrado del escritorio de Claude (Chromium) maneja el panel. **Firefox no
+      está instalado y Safari no se ha probado.**
+- [x] Dos sesiones simultáneas, una con Direct Play y otra con transcodificación.
+- [x] Reinicio durante una reproducción, con reanudación desde el progreso: en
+      Windows matando el proceso, y en Docker con `docker restart` y con `SIGKILL`.
+
+### Resultado de la Fase 10
+
+**El hito H3 está alcanzado en Windows y en Docker.** Los 14 criterios pasan en una
+instalación limpia, con las salvedades de arriba y de «Sin verificar».
+
+**Hallazgos de probar de verdad:**
+
+1. **El panel nunca reanudaba desde el progreso guardado.** El servidor no elige la
+   posición inicial (§12.4); el cliente la envía, y el panel abría siempre desde el
+   principio. Lo encontró el criterio 11. Ahora el reproductor empieza en la última
+   posición y ofrece «Empezar desde el principio».
+2. El diagnóstico no detectaba las bibliotecas en unidades de red con letra (§21.2),
+   que un servicio de Windows no ve. Ahora avisa.
+3. El FFmpeg de Alpine es la 6.1.2, no la 9.0.2 con la que se desarrolló. Se
+   comprobó de punta a punta y con la suite completa de Go en Linux: sin cambios.
+4. **El tone mapping depende de la build**: 0,32× tiempo real con la de gyan.dev en
+   Windows y 1,5–2,0× con la de Alpine en WSL2, en la misma máquina (ADR 0008).
+5. Mi herramienta de aceptación se colgaba al reiniciar el servidor: el servidor
+   hereda la tubería de salida del comando de reinicio. Es un fallo de la
+   herramienta, no del producto.
+
+**Pruebas de mutación:** 36 mutantes del código nuevo (métricas y latencia, CPU,
+direcciones de red, registros y su limpieza de secretos, comprobaciones del
+diagnóstico, orden de sesiones, herramienta de publicación). La primera pasada
+dejó 6 supervivientes (2 no compilaban): el redondeo del percentil, el máximo
+histórico, el filtrado de IPv6, el nivel de log en mayúsculas y **un defecto
+real**: dos sesiones iniciadas en el mismo instante salían en orden aleatorio
+(`Snapshots` iteraba un mapa). Se corrigió con un desempate por identificador y
+quedan **0 supervivientes**.
+
+**Sin verificar:** Firefox y Safari; macOS; la unidad de systemd en un
+Linux real; `release.yml` en GitHub (no se subió ninguna etiqueta); una máquina
+limpia distinta de la de desarrollo; una imagen publicada con el texto de la GPL;
+instaladores y servicio de Windows; las series en la herramienta de aceptación.
 
 **Criterio de salida:** los 14 criterios pasan en una instalación limpia.
+
+**Estado del criterio:** cumplido en un Windows limpio (binario) y en Docker. **No
+cumplido todavía** en macOS ni en un Linux con systemd, ni con Chrome, Firefox y
+Safari reales.
 
 ------------------------------------------------------------------------
 

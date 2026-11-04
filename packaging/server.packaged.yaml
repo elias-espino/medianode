@@ -1,0 +1,27 @@
+# Configuración para una instalación con systemd (packaging/README.md): rutas
+# absolutas en los directorios que crea la unidad. Cópiala a
+# /etc/medianode/server.yaml. Todas las claves y su significado están en
+# config/server.example.yaml; aquí solo lo que cambia con la instalación.
+
+server:
+  name: "MediaNode"
+  bind_address: "0.0.0.0"
+  http_port: 8420
+
+database:
+  path: "/var/lib/medianode/medianode.db"
+
+paths:
+  metadata: "/var/lib/medianode/metadata"
+  images: "/var/lib/medianode/images"
+  cache: "/var/lib/medianode/cache"
+  transcodes: "/var/lib/medianode/transcodes"
+  logs: "/var/log/medianode"
+  backups: "/var/lib/medianode/backups"
+
+# La clave de TMDB mejor por entorno: un archivo con
+#   MEDIANODE_METADATA_TMDB_API_KEY=...
+# (permisos 0600, dueño medianode) y, en la unidad, EnvironmentFile=/etc/medianode/medianode.env
+metadata:
+  provider: "tmdb"
+  language: "es-ES"

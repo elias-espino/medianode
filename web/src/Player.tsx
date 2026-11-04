@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, type MediaFile } from "./api";
+import type { ContinueItem } from "./api/types";
 import { detectProfile } from "./platform/capabilities";
-import { Alert, Spinner, errorText, formatBytes } from "./ui";
+import { Alert, Spinner, errorText, formatBytes, formatDuration } from "./ui";
 
 // Reproductor de prueba del panel: Direct Play en <video> y HLS (hls.js, o el
 // HLS nativo de Safari). Envía heartbeats, cambia de audio y de subtítulos
@@ -34,6 +35,22 @@ interface Track {
 // Cuántas veces seguidas se reanuda sola una sesión caducada antes de rendirse:
 // un servidor que las cierra al momento no debe provocar un bucle.
 const MAX_AUTO_RESUMES = 3;
+
+// Por debajo de esto, el progreso guardado no merece reanudar: se empieza
+// desde el principio (§12.3).
+const MIN_RESUME_MS = 10_000;
+
+// savedPosition es la posición donde se dejó el elemento, o 0. El servidor no
+// la elige por el cliente: es el cliente quien envía start_position_ms (§12.4).
+async function savedPosition(itemId: string): Promise<number> {
+  try {
+    const list = await api.get<ContinueItem[]>("/playback/continue-watching?limit=100");
+    const found = list.find((c) => c.id === itemId);
+    return found && found.position_ms >= MIN_RESUME_MS ? found.position_ms : 0;
+  } catch {
+    return 0;
+  }
+}
 const AUTO_RESUME_WINDOW_MS = 60_000;
 
 interface ExternalSubtitle {
@@ -80,6 +97,8 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
   const [epoch, setEpoch] = useState(0);
   const resumeMs = useRef<number | null>(null);
   const resumes = useRef<number[]>([]);
+  // Verdadero tras elegir «desde el principio»: no se vuelve a reanudar.
+  const fromStart = useRef(false);
   const [audios, setAudios] = useState<Track[]>([]);
   const [subtitles, setSubtitles] = useState<Track[]>([]);
   const [external, setExternal] = useState<ExternalSubtitle[]>([]);
@@ -131,17 +150,22 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       });
     };
 
-    const startMs = resumeMs.current;
+    const explicit = resumeMs.current;
     resumeMs.current = null;
-    detectProfile()
-      .then((profile) =>
-        api.post<Session>("/playback/sessions", {
+    // Una posición explícita (cambio de versión, sesión caducada) manda; si no,
+    // lo guardado, salvo que se haya pedido empezar de cero.
+    const startMs = explicit !== null ? Promise.resolve(explicit) : fromStart.current ? Promise.resolve(0) : savedPosition(itemId);
+    Promise.all([detectProfile(), startMs])
+      .then(([profile, start]) => {
+        if (closed) throw new Error("cerrado");
+        if (explicit === null && start > 0) setNotice(`Continúas donde lo dejaste (${formatDuration(start)}).`);
+        return api.post<Session>("/playback/sessions", {
           media_item_id: itemId,
           media_file_id: fileId ?? undefined,
           client_profile: profile,
-          start_position_ms: startMs ?? undefined,
-        }),
-      )
+          start_position_ms: start > 0 ? start : undefined,
+        });
+      })
       .then((s) => {
         if (closed) return;
         current.current = s;
@@ -165,6 +189,7 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
         });
       })
       .catch((e) => {
+        if (closed) return;
         if (e instanceof ApiError && e.code === "PLAYBACK_UNSUPPORTED") {
           setError(e.message + explain(e));
         } else {
@@ -187,6 +212,14 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
       closed = true;
     };
   }, [itemId, fileId, epoch]);
+
+  // Empezar desde el principio un elemento que se estaba reanudando.
+  const restartFromBeginning = () => {
+    fromStart.current = true;
+    resumeMs.current = 0;
+    setNotice(null);
+    setEpoch((n) => n + 1);
+  };
 
   // Otra versión del mismo elemento es otro archivo: sesión nueva, en el mismo
   // punto.
@@ -324,7 +357,19 @@ export function Player({ itemId, title, onClose }: { itemId: string; title: stri
           {busy && <Spinner label="Cambiando de pista…" />}
         </div>
       )}
-      {notice && <Alert>{notice}</Alert>}
+      {notice && (
+        <Alert kind="info">
+          {notice}
+          {notice.startsWith("Continúas") && (
+            <>
+              {" "}
+              <button className="btn btn-link" onClick={restartFromBeginning}>
+                Empezar desde el principio
+              </button>
+            </>
+          )}
+        </Alert>
+      )}
       <video
         ref={video}
         className="player-video"

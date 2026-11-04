@@ -7,8 +7,8 @@ películas y series, y las indexa, identifica qué son y las reproduce en un pan
 web o en cualquier cliente que use su API REST. Un único binario, SQLite para
 guardar los datos y ningún servicio externo obligatorio.
 
-> **Estado: alfa.** Funciona de principio a fin en Windows, pero es software
-> joven. Cuenta con asperezas, cambios que rompen compatibilidad y funciones que
+> **Estado: alfa.** Funciona de principio a fin en Windows y en Docker (Linux), pero
+> es software joven. Cuenta con asperezas, cambios que rompen compatibilidad y funciones que
 > faltan (mira [Qué funciona hoy](#qué-funciona-hoy)). No lo expongas a
 > Internet.
 
@@ -66,7 +66,31 @@ una pista real. En el equipo de desarrollo (un i5 antiguo de 4 núcleos), el ton
 mapping de HDR por software va a un tercio del tiempo real y no se reproduce con
 fluidez. En macOS, FFmpeg puede quedar vivo si el servidor muere de golpe.
 
-## Requisitos
+## Instalación
+
+No hacen falta herramientas de desarrollo. Elige una (los detalles, en
+[`packaging/`](packaging)):
+
+- **Binario.** Descarga el archivo de tu sistema (Windows, Linux o macOS, `amd64` o
+  `arm64`), compruébalo con `SHA256SUMS`, descomprímelo y ejecuta
+  `medianode-server`. Instala tú [FFmpeg](https://ffmpeg.org/download.html): es un
+  programa aparte y no se incluye (ver
+  [`docs/licencias-ffmpeg.md`](docs/licencias-ffmpeg.md)).
+- **Docker.** `docker compose up -d --build`, tras editar las rutas de
+  [`docker-compose.yml`](docker-compose.yml). La imagen trae FFmpeg.
+- **systemd.** Una unidad endurecida y una configuración para un servicio de Linux.
+
+Después abre <http://127.0.0.1:8420>, escribe el código inicial de un solo uso que
+imprime el log y crea la cuenta propietaria.
+
+`scripts/acceptance` comprueba los 14 criterios del MVP contra un servidor en
+marcha: pasan en un binario de Windows limpio y en la imagen de Docker. La
+reproducción por HLS se comprobó en Edge y Chrome. Aún sin probar: macOS, un
+systemd real, Firefox y Safari.
+
+## Compilar desde el código
+
+### Requisitos
 
 - [Go](https://go.dev/dl/) 1.27 o superior
 - [Node.js](https://nodejs.org/) 20 o superior, solo para compilar el panel web
@@ -75,7 +99,7 @@ fluidez. En macOS, FFmpeg puede quedar vivo si el servidor muere de golpe.
 
 El servidor se compila sin CGO, así que no hace falta un compilador de C.
 
-## Inicio rápido
+### Inicio rápido
 
 ```bash
 git clone https://github.com/elias-espino/medianode.git
@@ -204,6 +228,9 @@ siguiente.
 - [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md):
   el documento de arquitectura y diseño
 - [`docs/adr/`](docs/adr): registros de decisiones de arquitectura
+- [`packaging/`](packaging): instalar como binario, con Docker o con systemd
+- [`docs/licencias-ffmpeg.md`](docs/licencias-ffmpeg.md): qué implica la licencia de
+  FFmpeg al distribuir MediaNode
 
 El plan y el documento de arquitectura están escritos en español.
 

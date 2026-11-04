@@ -18,7 +18,7 @@ multiplataforma
   Nombre                              MediaNode --- Technical Design
                                       Document
 
-  Versión                             1.9
+  Versión                             1.10
 
   Estado                              Propuesta técnica de referencia
                                       para iniciar el desarrollo
@@ -1263,6 +1263,13 @@ una garantía absoluta.
 - **Límites:** además de los códecs, el perfil declara resolución
   máxima, profundidad de bits, formatos HDR y número de canales.
 
+**Perfil del navegador (Fase 10).** El panel detecta su perfil con
+`canPlayType` y `MediaCapabilities` y declara solo lo comprobado. No anuncia
+Matroska aunque el navegador diga «quizá». Declara HDR solo con pantalla HDR y
+decodificación de HEVC de 10 bits con PQ; si no, declara una lista de HDR
+vacía y el servidor hace el tone mapping. Anuncia HLS solo si hay Media Source
+o HLS nativo.
+
 ## 9.3 Algoritmo de decisión
 
 ``` text
@@ -1766,6 +1773,11 @@ suspende la aplicación, la sesión expira. Al volver, el cliente recibe
 `SESSION_EXPIRED` y crea una sesión nueva con `start_position_ms` en la
 última posición conocida, sin que el usuario tenga que intervenir.
 
+**El cliente envía la posición inicial** (`start_position_ms`); el servidor no
+la elige por él. El panel abre un elemento con progreso en esa posición (si pasa
+de 10 s) y ofrece empezar de cero, y tras `SESSION_EXPIRED` reanuda solo, con un
+tope de tres reanudaciones por minuto.
+
 ## 12.5 Reconciliación al arrancar
 
 Tras una caída o un apagado incorrecto, y antes de aceptar peticiones,
@@ -2118,13 +2130,15 @@ las recibe como URL opaca al crear la sesión.
   Método   Ruta                              Propósito
   -------- --------------------------------- --------------------------
   GET      `/admin/system`                   CPU, RAM y sistema
+  GET      `/admin/metrics`                  Métricas de §22.2
   GET      `/admin/sessions`                 Sesiones activas
+  GET      `/admin/network`                  Red y direcciones
   GET      `/admin/transcodes`               Trabajos FFmpeg
   POST     `/admin/transcodes/{id}/cancel`   Cancelar trabajo
   GET      `/admin/logs`                     Logs consultables
   GET      `/admin/storage`                  Almacenamiento
   GET      `/admin/settings`                 Configuración
-  PATCH    `/admin/settings`                 Actualizar configuración
+  PATCH    `/admin/settings`                 Actualizar configuración (pendiente: hoy es de solo lectura)
   GET      `/admin/system-check`             Ejecutar System Check
   GET      `/admin/users`                    Listar usuarios
   POST     `/admin/users`                    Crear usuario
@@ -2133,9 +2147,9 @@ las recibe como URL opaca al crear la sesión.
   DELETE   `/admin/users/{id}`               Eliminar usuario
   GET      `/admin/users/{id}/permissions`   Consultar permisos
   PUT      `/admin/users/{id}/permissions`   Permisos por biblioteca
-  GET      `/admin/backups`                  Listar copias
-  POST     `/admin/backups`                  Crear copia
-  POST     `/admin/backups/{id}/restore`     Restaurar copia
+  GET      `/admin/backups`                  Listar copias (pendiente)
+  POST     `/admin/backups`                  Crear copia (pendiente)
+  POST     `/admin/backups/{id}/restore`     Restaurar copia (pendiente)
 
 ## 16.3 Contrato de creación de sesión
 
@@ -2356,6 +2370,19 @@ temporal. - Estado de SQLite. - Disponibilidad de puertos. - Estado
 mDNS/SSDP. - Certificado TLS. - Conectividad remota, si está
 configurada.
 
+**Implementación (Fase 10).** `GET /admin/system-check` devuelve doce
+comprobaciones, cada una `ok`, `warn`, `fail` o `skipped`, con su mensaje:
+FFmpeg, FFprobe, códecs (`libx264`), aceleración por hardware (los
+codificadores compilados que no inician son un aviso, no un fallo), conversión
+de HDR (con su velocidad medida), permisos de las bibliotecas, espacio temporal
+frente a `transcoding.max_disk_gb`, SQLite (`PRAGMA quick_check` y modo de
+journal), puerto, mDNS y SSDP, TLS y conectividad remota. Las tres últimas
+todavía no existen y salen `skipped` (o `warn` si están activadas en la
+configuración).
+
+Las bibliotecas en una **unidad de red con letra** (`Z:\`) salen como `warn` en
+Windows: un servicio no las ve (§21.2); hay que registrarlas con su ruta UNC.
+
 # 20. Configuración y directorios
 
 ## 20.1 Directorios
@@ -2461,6 +2488,12 @@ arranca necesariamente desde el directorio de instalación.
   macOS            DMG o PKG
   Docker           Imagen oficial
 
+**Estado (Fase 10, ADR 0008).** Existen: los archivos `.zip` y `.tar.gz` de
+Windows, Linux y macOS en `amd64` y `arm64` (`make release`, reproducibles, con
+`SHA256SUMS`), la imagen de Docker (`Dockerfile` y `docker-compose.yml`) y una
+unidad de systemd de ejemplo. **Siguen pendientes** los instaladores MSI, DEB,
+RPM y PKG, el servicio de Windows y el LaunchDaemon.
+
 ## 21.2 Servicio del sistema
 
 -   Windows Service.
@@ -2498,6 +2531,12 @@ También revisar licencias de: - Dependencias Go. - Bibliotecas del
 cliente. - Fuentes tipográficas. - Recursos gráficos. - SDK de
 plataformas. - Proveedores de metadatos e imágenes.
 
+**Auditoría (Fase 10): `docs/licencias-ffmpeg.md`.** Los archivos de las
+versiones no incluyen FFmpeg; la imagen de Docker instala el de Alpine (GPL,
+con `libx264`) al construirse, y se niega a construirse con una build
+`--enable-nonfree`. Las 26 dependencias de Go del servidor son MIT, BSD,
+Apache-2.0 o ISC.
+
 # 22. Observabilidad y soporte
 
 ## 22.1 Logs
@@ -2522,6 +2561,16 @@ Contenido de archivos.
 -   Bitrate aproximado por sesión.
 -   Conexiones locales/remotas.
 -   Latencia de endpoints.
+
+**Implementación (Fase 10).** `GET /admin/metrics` y la pestaña «Resumen» del
+panel (se refresca cada 5 s mientras la pestaña está a la vista). CPU es la del
+proceso del servidor como porcentaje de toda la máquina; la latencia (p50, p95 y
+máximo, con las últimas 256 muestras) se agrupa por el patrón de la ruta, no por
+la URL, y no mide el streaming ni `/events`, que duran minutos. El bitrate por
+sesión es aproximado: el del archivo, o el de la salida si se transcodifica.
+Las sesiones y trabajos activos y las conexiones locales y remotas salen de
+`/admin/sessions` y `/admin/network`. Los logs se leen con `/admin/logs`, que
+vuelve a ocultar URL de streaming y campos sensibles.
 
 ## 22.3 Códigos de error
 

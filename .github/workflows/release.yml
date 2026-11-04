@@ -1,0 +1,39 @@
+name: Release
+
+# Se ejecuta al subir una etiqueta v* (por ejemplo v0.1.0 o v0.2.0-beta.1).
+# Publica los paquetes de Windows, Linux y macOS con su SHA256SUMS. Los archivos
+# no incluyen FFmpeg: docs/licencias-ffmpeg.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Panel web
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Paquetes
+        run: go run ./scripts/release -version "${GITHUB_REF_NAME}" -out dist/release
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=""
+          case "${GITHUB_REF_NAME}" in *-*) flags="--prerelease" ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/release/* --generate-notes $flags

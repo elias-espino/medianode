@@ -1,0 +1,21 @@
+# El contexto de compilación solo necesita el código: lo demás lo genera la imagen.
+.git
+.github
+.claude
+.e2e
+bin
+dist
+data
+logs
+backups
+node_modules
+web/node_modules
+web/dist
+config/server.yaml
+testdata/fixtures
+*.db
+*.db-shm
+*.db-wal
+*.exe
+*.test
+*.out

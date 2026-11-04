@@ -237,7 +237,13 @@ func TestAdminRegistros(t *testing.T) {
 	if got = parseJSON[[]map[string]any](t, body); len(got) != 1 || got[0]["message"] != "tres" {
 		t.Fatalf("lines=1: %s", body)
 	}
-	for _, bad := range []string{"lines=0", "lines=-3", "lines=abc", "lines=5000", "level=ruido", "q=" + strings.Repeat("x", 201)} {
+	// Los límites son inclusivos: 1 y 1000 valen; 0 y 1001, no.
+	for _, ok := range []string{"lines=1", "lines=1000", "q=" + strings.Repeat("x", 200), "level=error", "level=debug"} {
+		if _, body, code = e.adminGet(own.token, "/admin/logs?"+ok); code != http.StatusOK {
+			t.Errorf("%s debía valer: %d %s", ok[:min(len(ok), 20)], code, body)
+		}
+	}
+	for _, bad := range []string{"lines=0", "lines=1001", "lines=-3", "lines=abc", "lines=5000", "level=ruido", "q=" + strings.Repeat("x", 201)} {
 		if _, body, code = e.adminGet(own.token, "/admin/logs?"+bad); code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", bad, code, body)
 		}

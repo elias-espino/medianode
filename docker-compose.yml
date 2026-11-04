@@ -1,0 +1,45 @@
+# Ejemplo de despliegue con Docker Compose.
+#
+#   1. Cambia las rutas de «volumes» por las de tu equipo.
+#   2. docker compose up -d --build
+#   3. Abre http://<tu-equipo>:8420 y usa el código inicial que imprime el log:
+#        docker compose logs medianode | grep "usa este código"
+#
+# Los datos quedan en ./medianode (base de datos, imágenes, caché, logs). Las
+# bibliotecas se añaden desde el panel, con la ruta que ves DENTRO del
+# contenedor (aquí, /media/...).
+
+services:
+  medianode:
+    build: .
+    image: medianode:local
+    container_name: medianode
+    restart: unless-stopped
+
+    # Red del equipo: es lo que permitirá el descubrimiento en la red local
+    # (mDNS y DLNA, fase 13) y evita publicar puertos. SOLO funciona en Linux.
+    # En Docker Desktop (Windows y macOS) comenta esta línea y descomenta «ports».
+    network_mode: host
+    # ports:
+    #   - "8420:8420"
+
+    # Para no ejecutar como root, usa el uid de tu usuario (id -u) y que
+    # ./medianode le pertenezca. La imagen trae uno propio (10001).
+    # user: "1000:1000"
+
+    volumes:
+      - ./medianode:/medianode
+      - /ruta/a/tus/peliculas:/media/peliculas:ro
+      - /ruta/a/tus/series:/media/series:ro
+
+    environment:
+      TZ: Europe/Madrid
+      # Clave de TMDB (https://www.themoviedb.org/settings/api). No la escribas
+      # en este archivo si lo vas a compartir: usa un .env junto a él.
+      MEDIANODE_METADATA_TMDB_API_KEY: ${TMDB_API_KEY:-}
+      # Cualquier clave de server.yaml se puede fijar así.
+      # MEDIANODE_TRANSCODING_MAX_CONCURRENT_JOBS: "2"
+
+    # Aceleración por hardware (solo Linux, y solo si FFmpeg la trae):
+    # devices:
+    #   - /dev/dri:/dev/dri

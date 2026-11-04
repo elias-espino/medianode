@@ -7,7 +7,8 @@ and it indexes them, identifies what they are, and plays them in a web panel or
 any client that speaks its REST API. One static binary, SQLite for storage, no
 external services required.
 
-> **Status: alpha.** It works end to end on Windows, but it is early software.
+> **Status: alpha.** It works end to end on Windows and in Docker (Linux), but it is
+> early software.
 > Expect rough edges, breaking changes and missing features (see
 > [What works today](#what-works-today)). Do not expose it to the Internet.
 
@@ -60,7 +61,29 @@ on a real track. On the development machine (an old 4-core i5), software HDR
 tone mapping runs at about a third of real time, so it does not play smoothly.
 On macOS, FFmpeg may stay alive if the server is killed.
 
-## Requirements
+## Install
+
+No development tools needed. Pick one (details in [`packaging/`](packaging)):
+
+- **Binary.** Download the archive for your system (Windows, Linux or macOS, `amd64`
+  or `arm64`), check it against `SHA256SUMS`, unpack it and run `medianode-server`.
+  Install [FFmpeg](https://ffmpeg.org/download.html) yourself: it is a separate
+  program and is not included (see
+  [`docs/licencias-ffmpeg.md`](docs/licencias-ffmpeg.md)).
+- **Docker.** `docker compose up -d --build`, after editing the paths in
+  [`docker-compose.yml`](docker-compose.yml). The image brings FFmpeg.
+- **systemd.** A hardened unit and a configuration for a Linux service.
+
+Then open <http://127.0.0.1:8420>, enter the one-time setup code the log prints and
+create the owner account.
+
+The 14 MVP criteria are checked by `scripts/acceptance` against a running server;
+they pass on a clean Windows binary and on the Docker image. HLS playback was
+checked in Edge and Chrome. Not yet tried: macOS, a real systemd, Firefox and Safari.
+
+## Build from source
+
+### Requirements
 
 - [Go](https://go.dev/dl/) 1.27 or newer
 - [Node.js](https://nodejs.org/) 20 or newer, only to build the web panel
@@ -69,7 +92,7 @@ On macOS, FFmpeg may stay alive if the server is killed.
 
 The server builds without CGO, so no C compiler is needed.
 
-## Quick start
+### Quick start
 
 ```bash
 git clone https://github.com/elias-espino/medianode.git
@@ -194,6 +217,9 @@ The project is built in phases, each verified before the next one starts.
 - [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md):
   the architecture and design document
 - [`docs/adr/`](docs/adr): architecture decision records
+- [`packaging/`](packaging): installing as a binary, with Docker or with systemd
+- [`docs/licencias-ffmpeg.md`](docs/licencias-ffmpeg.md): what the FFmpeg license
+  means for distributing MediaNode (in Spanish)
 
 The plan and the architecture document are written in Spanish.
 

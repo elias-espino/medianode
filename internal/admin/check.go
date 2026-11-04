@@ -144,7 +144,7 @@ func (s *Service) checkLibraries(ctx context.Context) Check {
 	}
 	defer rows.Close()
 	var total int
-	var bad []string
+	var bad, mapped []string
 	for rows.Next() {
 		var lib, path string
 		if rows.Scan(&lib, &path) != nil {
@@ -153,6 +153,8 @@ func (s *Service) checkLibraries(ctx context.Context) Check {
 		total++
 		if err := readable(path); err != nil {
 			bad = append(bad, fmt.Sprintf("%s (%s): %s", lib, path, reason(err)))
+		} else if networkDrive(path) {
+			mapped = append(mapped, fmt.Sprintf("%s (%s)", lib, path))
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -163,9 +165,16 @@ func (s *Service) checkLibraries(ctx context.Context) Check {
 		return check(id, name, CheckSkipped, "Todavía no hay carpetas de bibliotecas.")
 	case len(bad) > 0:
 		return check(id, name, CheckFail, "No se pueden leer: %s.", strings.Join(bad, "; "))
+	case len(mapped) > 0:
+		// §21.2: las letras de unidad de red son de cada sesión de usuario y un
+		// servicio de Windows no las ve.
+		return check(id, name, CheckWarn, "Están en una unidad de red con letra: %s. Si MediaNode corre como servicio de Windows no las verá; registra la biblioteca con su ruta UNC (\\\\servidor\\recurso).", strings.Join(mapped, "; "))
 	}
 	return check(id, name, CheckOK, "%d carpeta(s) legibles.", total)
 }
+
+// networkDrive es isMappedNetworkDrive; las pruebas lo sustituyen.
+var networkDrive = isMappedNetworkDrive
 
 // readable comprueba que el servidor puede entrar en el directorio y listarlo.
 func readable(path string) error {

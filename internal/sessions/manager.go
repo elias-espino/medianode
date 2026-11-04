@@ -745,7 +745,15 @@ func (m *Manager) Snapshots() []Session {
 		out = append(out, *s)
 	}
 	m.mu.Unlock()
-	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
+	// El identificador (UUIDv7) crece con el tiempo: desempata dos sesiones
+	// iniciadas en el mismo instante, que de otro modo saldrían en un orden
+	// cualquiera, el de iterar un mapa.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].StartedAt.Equal(out[j].StartedAt) {
+			return out[i].StartedAt.Before(out[j].StartedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

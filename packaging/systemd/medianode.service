@@ -1,0 +1,69 @@
+# Unidad de systemd para MediaNode. Instalación: packaging/README.md.
+#
+#   /usr/local/bin/medianode-server    el binario
+#   /etc/medianode/server.yaml         la configuración (packaging/server.packaged.yaml)
+#   /var/lib/medianode                 base de datos, imágenes y caché
+#   /var/log/medianode                 logs
+#
+# systemd crea y asigna esos directorios al usuario del servicio.
+
+[Unit]
+Description=MediaNode, servidor multimedia
+Documentation=https://github.com/elias-espino/medianode
+After=network-online.target local-fs.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/medianode-server --config /etc/medianode/server.yaml
+Restart=on-failure
+RestartSec=5
+
+# Usuario sin privilegios. DynamicUser da un usuario nuevo en cada arranque; para
+# leer unas bibliotecas que pertenecen a otro usuario, o a un grupo, es más
+# cómodo uno fijo: sudo useradd --system --home-dir /var/lib/medianode medianode
+# y añadirlo a ese grupo (usermod -aG).
+User=medianode
+Group=medianode
+StateDirectory=medianode
+LogsDirectory=medianode
+ConfigurationDirectory=medianode
+UMask=0027
+
+# Una parada limpia puede tardar mientras se cierran sesiones y se vuelca el
+# progreso; server.shutdown_timeout_seconds es 30 por defecto.
+TimeoutStopSec=45
+KillMode=control-group
+LimitNOFILE=65536
+# FFmpeg es lo que consume: que no se coma la máquina a costa del resto.
+Nice=5
+
+# Endurecimiento. El servidor solo escribe en sus directorios y lee las
+# bibliotecas; no necesita privilegios.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=no
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSuidSgid=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Bibliotecas fuera de /home, /usr y /opt: ReadWritePaths no hace falta (solo
+# se leen), pero ProtectSystem=strict deja el resto del sistema de solo lectura.
+# Si tus bibliotecas están en un disco montado, no hace falta listarlas aquí.
+# La aceleración por hardware necesita /dev/dri (PrivateDevices=no ya lo permite).
+
+[Install]
+WantedBy=multi-user.target
