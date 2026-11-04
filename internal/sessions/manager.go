@@ -419,6 +419,19 @@ func (m *Manager) Get(ctx context.Context, actor authorization.Actor, id string)
 	return m.fromRow(ctx, row)
 }
 
+// SetTracks guarda las pistas de audio y de subtítulos elegidas de una sesión
+// abierta. Una terminada no se modifica.
+func (m *Manager) SetTracks(ctx context.Context, id string, audio, subtitle *string) error {
+	n, err := m.db.Q.UpdateSessionTracks(ctx, sqlc.UpdateSessionTracksParams{ID: id, SelectedAudioStreamID: audio, SelectedSubtitleID: subtitle})
+	if err != nil {
+		return fmt.Errorf("guardar pistas: %w", err)
+	}
+	if n == 0 {
+		return core.ErrSessionExpired()
+	}
+	return nil
+}
+
 // Heartbeat registra el estado que informa el cliente. Un cambio de estado se
 // guarda al momento; la posición, en el siguiente volcado, salvo al pausar.
 func (m *Manager) Heartbeat(ctx context.Context, actor authorization.Actor, id string, hb Heartbeat) (*Session, error) {

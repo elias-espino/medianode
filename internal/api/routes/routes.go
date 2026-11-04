@@ -18,6 +18,7 @@ import (
 	"medianode/internal/database"
 	"medianode/internal/devices"
 	"medianode/internal/events"
+	"medianode/internal/ffmpeg"
 	"medianode/internal/images"
 	"medianode/internal/libraries"
 	"medianode/internal/media"
@@ -55,6 +56,7 @@ type Deps struct {
 	Progress       *sessions.Progress
 	Playback       *playback.Service
 	Transcoder     *transcoding.Manager
+	FFmpeg         *ffmpeg.Capabilities
 	DB             *database.DB
 	Bus            *events.Bus
 	Authorizer     *authorization.Authorizer
@@ -88,6 +90,7 @@ func NewRouter(deps Deps) http.Handler {
 	server := &handlers.Server{
 		Name: deps.Name, Version: deps.Version, Log: deps.Log, SetupRequired: deps.Auth.SetupRequired,
 		Started: deps.Started, FFprobeAvailable: deps.FFprobe, Transcoder: deps.Transcoder, Catalog: deps.Catalog, Enricher: deps.Enricher,
+		FFmpeg: deps.FFmpeg,
 	}
 	mediaH := &handlers.Media{Catalog: deps.Catalog, Metadata: deps.Metadata, Images: deps.Images, Log: deps.Log}
 	playbackH := &handlers.Playback{Sessions: deps.Sessions, Progress: deps.Progress, Playback: deps.Playback, Log: deps.Log}
@@ -112,6 +115,8 @@ func NewRouter(deps Deps) http.Handler {
 		// HLS: las rutas fijas van antes que el comodín de segmentos.
 		r.Get("/master.m3u8", streamH.Master)
 		r.Get("/media.m3u8", streamH.Media)
+		r.Get("/subs.m3u8", streamH.SubtitlePlaylist)
+		r.Get("/subs.vtt", streamH.SubtitleTrack)
 		r.Get("/{name}", streamH.Segment)
 	})
 	r.Route("/api/v1", func(r chi.Router) {
@@ -176,6 +181,7 @@ func NewRouter(deps Deps) http.Handler {
 			r.Post("/playback/sessions", playbackH.CreateSession)
 			r.Get("/playback/sessions/{id}", playbackH.GetSession)
 			r.Patch("/playback/sessions/{id}", playbackH.Heartbeat)
+			r.Post("/playback/sessions/{id}/tracks", playbackH.ChangeTracks)
 			r.Delete("/playback/sessions/{id}", playbackH.StopSession)
 			r.Put("/playback/progress", playbackH.PutProgress)
 			r.Get("/playback/continue-watching", playbackH.ContinueWatching)

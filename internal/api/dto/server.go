@@ -51,6 +51,13 @@ type ServerCapabilities struct {
 	Transcoding      bool     `json:"transcoding"`
 	VideoEncoder     *string  `json:"video_encoder"`
 	HLS              bool     `json:"hls"`
+	// Subtítulos y HDR (Fase 9): lo que el FFmpeg instalado puede hacer.
+	SubtitleConversion bool `json:"subtitle_conversion"`
+	SubtitleBurnIn     bool `json:"subtitle_burn_in"`
+	ToneMapping        bool `json:"tone_mapping"`
+	// Veces el tiempo real a las que este equipo convierte un HDR de 720p a SDR
+	// por software; null si no se midió.
+	ToneMappingSpeed *float64 `json:"tone_mapping_speed"`
 	Events           bool     `json:"events"`
 }
 

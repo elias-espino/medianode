@@ -38,16 +38,27 @@ external services required.
   are limited (`transcoding.max_concurrent_jobs`), the server answers `503` with
   `Retry-After` when it is full, and FFmpeg never outlives the server on
   Windows and Linux.
+- **Subtitles and audio.** Embedded and external text subtitles (SRT, ASS,
+  WebVTT) are converted to WebVTT, delivered next to the video or inside HLS, or
+  burned into the picture when the client cannot show them. Surround audio is
+  mixed down for stereo clients. Audio and subtitles can be switched while
+  playing, resuming at the same position.
+- **HDR to SDR.** An HDR video is converted for clients that cannot show it.
+  This is expensive in software: the server measures its speed at startup and
+  `transcoding.tone_mapping` (`auto`, `realtime`, `off`) decides what to do
+  when the machine cannot keep up.
 - **Web panel.** A React panel embedded in the binary: first-run wizard,
   libraries, users, metadata, search and a player (Direct Play and HLS through
-  hls.js).
+  hls.js) with audio and subtitle selectors.
 
-**Not done yet:** subtitle extraction and burn-in, HDR tone mapping, native
-mobile and TV clients, DLNA, discovery on the local network, remote access, TLS
-and installers. HLS has been verified in Chromium with hls.js; Safari, iOS and
-Android players are untested, and only software encoding (libx264) has been
-tried: hardware encoders are detected but unverified. On macOS, FFmpeg may stay
-alive if the server is killed.
+**Not done yet:** native mobile and TV clients, DLNA, discovery on the local
+network, remote access, TLS and installers. HLS has been verified in Chromium
+with hls.js; Safari, iOS and Android players are untested, and only software
+encoding (libx264) has been tried: hardware encoders are detected but
+unverified. Burning image subtitles (PGS, VobSub) is implemented but has not run
+on a real track. On the development machine (an old 4-core i5), software HDR
+tone mapping runs at about a third of real time, so it does not play smoothly.
+On macOS, FFmpeg may stay alive if the server is killed.
 
 ## Requirements
 

@@ -65,6 +65,14 @@ type CreateSessionResponse struct {
 	Reasons               []PlaybackReason `json:"reasons"`
 }
 
+// ChangeTracksRequest cambia las pistas de una sesión viva. Un campo omitido
+// no cambia; selected_subtitle_id "none" desactiva los subtítulos.
+type ChangeTracksRequest struct {
+	SelectedAudioStreamID *string `json:"selected_audio_stream_id"`
+	SelectedSubtitleID    *string `json:"selected_subtitle_id"`
+	PositionMS            *int64  `json:"position_ms"`
+}
+
 // HeartbeatRequest informa del estado del reproductor.
 type HeartbeatRequest struct {
 	State      string `json:"state"`

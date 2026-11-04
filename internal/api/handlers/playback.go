@@ -62,6 +62,32 @@ func (h *Playback) CreateSession(w http.ResponseWriter, r *http.Request) {
 		api.WriteFailure(w, r, h.Log, err)
 		return
 	}
+	api.WriteJSON(w, http.StatusCreated, h.sessionResponse(resp))
+}
+
+// ChangeTracks cambia el audio o los subtítulos de una sesión viva y, en HLS,
+// devuelve el stream_url de la nueva revisión.
+func (h *Playback) ChangeTracks(w http.ResponseWriter, r *http.Request) {
+	var req dto.ChangeTracksRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	if req.SelectedAudioStreamID == nil && req.SelectedSubtitleID == nil {
+		api.WriteError(w, r, core.ErrValidation("Indica selected_audio_stream_id o selected_subtitle_id"))
+		return
+	}
+	resp, err := h.Playback.ChangeTracks(r.Context(), mustActor(r), chi.URLParam(r, "id"), playback.TrackChange{
+		AudioStreamID: req.SelectedAudioStreamID, SubtitleID: req.SelectedSubtitleID, PositionMS: req.PositionMS,
+	})
+	if err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, h.sessionResponse(resp))
+}
+
+func (h *Playback) sessionResponse(resp *playback.Response) dto.CreateSessionResponse {
 	d, s := resp.Decision, resp.Session
 	out := dto.CreateSessionResponse{
 		SessionID: s.ID, Status: string(s.Status), MediaFileID: resp.File.ID, PlaybackMode: string(d.Mode),
@@ -83,7 +109,7 @@ func (h *Playback) CreateSession(w http.ResponseWriter, r *http.Request) {
 	for _, rr := range d.Reasons {
 		out.Reasons = append(out.Reasons, dto.PlaybackReason{Code: rr.Code, Stream: rr.Stream})
 	}
-	api.WriteJSON(w, http.StatusCreated, out)
+	return out
 }
 
 // GetSession devuelve una sesión propia, activa o terminada.

@@ -917,6 +917,23 @@ section + section,
   flex-direction: column;
   gap: 1rem;
 }
+.player-tracks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.25rem;
+}
+.player-tracks label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.player-tracks select {
+  min-width: 12rem;
+  max-width: 100%;
+}
 .player-video {
   width: 100%;
   max-height: 70vh;

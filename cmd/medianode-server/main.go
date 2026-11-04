@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"medianode/internal/api"
 	"medianode/internal/api/routes"
 	"medianode/internal/auth"
@@ -36,6 +38,7 @@ import (
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
 	"medianode/internal/storage"
+	"medianode/internal/subtitles"
 	"medianode/internal/transcoding"
 	"medianode/internal/users"
 	"medianode/web"
@@ -65,6 +68,28 @@ func main() {
 		stop() // Una segunda señal termina el proceso sin esperar.
 	}()
 	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// applyToneMapPolicy aplica transcoding.tone_mapping a lo que FFmpeg puede
+// hacer, y avisa si este equipo no llega a tiempo real (§10.8). La conversión
+// por software de un HDR es cara: en un equipo lento la imagen se cortaría.
+func applyToneMapPolicy(c *ffmpeg.Capabilities, policy string, log zerolog.Logger) {
+	if !c.ToneMapping {
+		return
+	}
+	slow := c.ToneMapSpeed > 0 && c.ToneMapSpeed < 1
+	switch {
+	case policy == "off":
+		c.ToneMapping = false
+		log.Info().Msg("tone mapping desactivado por configuración: los HDR que el cliente no admita se rechazarán")
+	case policy == "realtime" && slow:
+		c.ToneMapping = false
+		log.Warn().Float64("velocidad", c.ToneMapSpeed).
+			Msg("este equipo convierte HDR a SDR por debajo del tiempo real: se rechazarán los HDR que el cliente no admita (transcoding.tone_mapping)")
+	case slow:
+		log.Warn().Float64("velocidad", c.ToneMapSpeed).
+			Msg("este equipo convierte HDR a SDR por debajo del tiempo real (720p): la reproducción de un HDR en un cliente SDR se cortará; transcoding.tone_mapping: realtime lo rechaza en su lugar")
+	}
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -224,6 +249,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		} else if !ffcaps.Encoders[ffmpeg.X264] {
 			log.Warn().Str("version", ffcaps.Version).Msg("este FFmpeg no incluye libx264: solo habrá Direct Play")
 		} else {
+			applyToneMapPolicy(ffcaps, cfg.Transcoding.ToneMapping, log)
 			encoder := ffcaps.Choose(cfg.Transcoding.HardwareAcceleration)
 			log.Info().Str("version", ffcaps.Version).Str("codificador", string(encoder)).
 				Interface("disponibles", ffcaps.Working).Msg("FFmpeg listo")
@@ -234,6 +260,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			}, db, bus, transcoding.NewAdmission(cfg.Transcoding.MaxConcurrentJobs, cfg.Transcoding.MaxConcurrentLightJobs),
 				monitoring.Module(log, "transcoding"))
 			playbackService.Transcoder = transcoder
+			playbackService.Subtitles = subtitles.NewManager(ffmpegPath, filepath.Join(cfg.Paths.Cache, "subtitles"), monitoring.Module(log, "subtitles"))
+			playbackService.Features = playback.FeaturesOf(ffcaps)
 			sessionManager.AddListener(sessions.ListenerFunc(func(s sessions.Session) { transcoder.OnSessionEnded(s.ID) }))
 			manager.Register(transcoder)
 			if ffprobe != "" {
@@ -259,6 +287,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		Sessions:   sessionManager,
 		Playback:   playbackService,
 		Transcoder: transcoder,
+		FFmpeg:     ffcaps,
 		DB:         db,
 		Progress: sessions.NewProgress(db, authz, bus,
 			float64(cfg.Sessions.CompletedThresholdPercent)/100),

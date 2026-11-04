@@ -805,6 +805,38 @@ paths:
         "204": { description: Sesión cerrada }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /playback/sessions/{id}/tracks:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Cambiar el audio o los subtítulos de una sesión viva
+      description: >-
+        Un campo omitido no cambia; selected_subtitle_id "none" desactiva los subtítulos.
+        La posición por defecto es la última de la sesión. En una sesión HLS reinicia
+        FFmpeg con las pistas nuevas, sin tocar el cupo, y devuelve un stream_url con otra
+        revisión (?rev=N): el cliente debe recargar la lista desde esa posición. En una
+        de Direct Play solo cambia la selección guardada y subtitle_url, porque el
+        reproductor elige el audio del archivo; si el cambio exigiera remux o
+        transcodificar responde 422 PLAYBACK_UNSUPPORTED y hay que crear otra sesión.
+        Una sesión terminada, o que el servidor ya no recuerda, responde 410
+        SESSION_EXPIRED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeTracksRequest" }
+      responses:
+        "200":
+          description: Pistas cambiadas
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateSessionResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /playback/progress:
     put:
       summary: Guardar progreso
@@ -937,10 +969,17 @@ paths:
       - name: name
         in: path
         required: true
-        description: Identificador del subtítulo y extensión; .vtt de un SRT lo convierte.
+        description: >-
+          Identificador del subtítulo y extensión. Un externo se entrega tal cual con su
+          extensión; con .vtt, un SRT se convierte sin FFmpeg y un ASS u otro formato de
+          texto se convierte con FFmpeg. Una pista interna de texto solo existe como .vtt.
         schema: { type: string }
     get:
-      summary: Subtítulo externo del archivo de la sesión
+      summary: Subtítulo del archivo de la sesión
+      description: >-
+        Si la conversión aún no ha terminado, espera hasta 25 s y responde 503 con
+        Retry-After; la extracción continúa en segundo plano. Las pistas de imagen no
+        se convierten (404).
       security: []
       responses:
         "200":
@@ -949,6 +988,7 @@ paths:
             text/vtt:
               schema: { type: string }
         "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
   /stream/session/{id}/{token}/master.m3u8:
@@ -992,6 +1032,48 @@ paths:
               schema: { type: string }
         "404": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/subs.m3u8:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Playlist de la pista de subtítulos de HLS
+      description: >-
+        Solo existe si el master declara una pista de subtítulos (subtitle_mode hls). Un
+        único segmento WebVTT, subs.vtt, que dura lo que el vídeo. Si no, 404.
+      security: []
+      responses:
+        "200":
+          description: Playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/subs.vtt:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Subtítulos WebVTT de la pista de HLS
+      description: >-
+        La pista elegida al crear la sesión, convertida con FFmpeg. Si aún se está
+        extrayendo, la petición espera hasta 25 s y responde 503 con Retry-After si no
+        termina; la extracción continúa para el siguiente intento.
+      security: []
+      responses:
+        "200":
+          description: WebVTT
+          content:
+            text/vtt:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /stream/session/{id}/{token}/{name}:
     servers:
       - url: /
@@ -1313,6 +1395,10 @@ components:
         transcoding: { type: boolean }
         video_encoder: { type: string, nullable: true, description: Codificador efectivo, p. ej. libx264. }
         hls: { type: boolean }
+        subtitle_conversion: { type: boolean, description: Convierte subtítulos internos y ASS a WebVTT. }
+        subtitle_burn_in: { type: boolean, description: Puede grabar subtítulos de texto y de imagen en el vídeo. }
+        tone_mapping: { type: boolean, description: Puede pasar HDR a SDR al transcodificar y la configuración lo permite. }
+        tone_mapping_speed: { type: number, nullable: true, description: Veces el tiempo real a las que este equipo convierte un HDR de 720p a SDR por software; menos de 1 corta la imagen. }
         events: { type: boolean }
     ServerStatus:
       type: object
@@ -1621,6 +1707,12 @@ components:
         capacity:
           type: object
           additionalProperties: { $ref: "#/components/schemas/Capacity" }
+    ChangeTracksRequest:
+      type: object
+      properties:
+        selected_audio_stream_id: { type: string, nullable: true }
+        selected_subtitle_id: { type: string, nullable: true, description: Una pista, un subtítulo externo o "none". }
+        position_ms: { type: integer, minimum: 0, description: Por defecto, la última posición de la sesión. }
     CreateSessionRequest:
       type: object
       required: [media_item_id]

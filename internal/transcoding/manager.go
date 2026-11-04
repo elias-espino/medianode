@@ -72,6 +72,15 @@ type Plan struct {
 	// Solo al recodificar el vídeo.
 	Height       int
 	VideoBitrate int
+	// ToneMap es la transferencia HDR del origen cuando la salida es SDR
+	// (ffmpeg.TransferPQ o TransferHLG); vacío sin tone mapping.
+	ToneMap string
+	// Burn graba un subtítulo en la imagen. BurnFile es la ruta absoluta de un
+	// subtítulo de texto ya convertido a ASS; se copia al directorio del
+	// trabajo. BurnStream es la pista de imagen en el archivo de origen.
+	Burn       ffmpeg.BurnKind
+	BurnFile   string
+	BurnStream int
 	// Solo al copiarlo; nil sin índice: playlist EVENT.
 	Keyframes *Index
 	Variant   Variant
@@ -116,6 +125,9 @@ type stream struct {
 	genStart  map[int]int // Primer segmento de cada trabajo, por generación.
 	completed map[int]bool
 	lastAsked int
+	// closed marca un flujo terminado o sustituido: ninguna petición en vuelo
+	// puede volver a arrancar FFmpeg sobre él.
+	closed bool
 }
 
 // Manager coordina los trabajos.
@@ -219,6 +231,13 @@ func (m *Manager) Prepare(ctx context.Context, p Plan) error {
 	if err := os.MkdirAll(st.dir, 0o750); err != nil {
 		return fmt.Errorf("crear directorio del trabajo: %w", err)
 	}
+	if p.Burn == ffmpeg.BurnText {
+		// El filtro subtitles lee un nombre relativo y sin caracteres especiales.
+		if err := copyFile(p.BurnFile, filepath.Join(st.dir, burnName)); err != nil {
+			_ = os.RemoveAll(st.dir)
+			return fmt.Errorf("copiar el subtítulo: %w", err)
+		}
+	}
 	m.mu.Lock()
 	m.streams[p.SessionID] = st
 	m.mu.Unlock()
@@ -259,6 +278,44 @@ func (m *Manager) Master(sessionID string) ([]byte, error) {
 		return nil, err
 	}
 	return MasterPlaylist(st.plan.Variant), nil
+}
+
+// SubtitlePlaylist devuelve la playlist de la pista WebVTT del master, o
+// ErrNoStream si la sesión no lleva subtítulos dentro de HLS.
+func (m *Manager) SubtitlePlaylist(sessionID string) ([]byte, error) {
+	st, err := m.get(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if st.plan.Variant.Subtitle == nil {
+		return nil, ErrNoStream
+	}
+	return SubtitlePlaylist(st.plan.DurationUS), nil
+}
+
+// SubtitleTrackID es la pista de subtítulos que viaja dentro de HLS en la
+// sesión, o ErrNoStream si no hay.
+func (m *Manager) SubtitleTrackID(sessionID string) (string, error) {
+	st, err := m.get(sessionID)
+	if err != nil {
+		return "", err
+	}
+	if st.plan.Variant.Subtitle == nil {
+		return "", ErrNoStream
+	}
+	return st.plan.Variant.Subtitle.ID, nil
+}
+
+// burnName es el subtítulo de texto que se graba, dentro del directorio del
+// trabajo.
+const burnName = "sub.ass"
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o600) //nolint:gosec // dst es burnName dentro del directorio del trabajo; src, la caché de subtítulos
 }
 
 // Media devuelve la playlist de medios: la sintética VOD o, sin índice, la
@@ -448,6 +505,14 @@ func (m *Manager) waitInit(ctx context.Context, st *stream) (string, error) {
 	}
 }
 
+func burnParams(p Plan) ffmpeg.Burn {
+	b := ffmpeg.Burn{Kind: p.Burn, Stream: p.BurnStream}
+	if p.Burn == ffmpeg.BurnText {
+		b.File = burnName
+	}
+	return b
+}
+
 func initName(gen int) string { return fmt.Sprintf("init_%d.mp4", gen) }
 func listName(gen int) string { return fmt.Sprintf("list_%d.csv", gen) }
 
@@ -455,12 +520,19 @@ func listName(gen int) string { return fmt.Sprintf("list_%d.csv", gen) }
 // Mientras se espera a FFmpeg el candado se suelta; si otra petición arrancó
 // ya un trabajo, se respeta el suyo y quien llama vuelve a evaluar.
 func (m *Manager) restart(st *stream, n int) error {
+	if st.closed {
+		return ErrNoStream
+	}
 	old := st.job
 	if old != nil {
 		m.stopJob(st, old)
 		if st.job != old {
 			return nil
 		}
+	}
+	// stopJob suelta el candado: el flujo pudo cerrarse mientras tanto.
+	if st.closed {
+		return ErrNoStream
 	}
 	st.gen++
 	return m.startJob(st, n)
@@ -499,6 +571,7 @@ func (m *Manager) startJob(st *stream, n int) error {
 			Input: in, Audio: audio, Encoder: encoder, Height: p.Height, VideoBitrate: p.VideoBitrate,
 			SegmentSeconds: m.opts.SegmentSeconds, StartSegment: n,
 			InitName: initName(st.gen), Playlist: fmt.Sprintf("ffmpeg_%d.m3u8", st.gen),
+			ToneMap: p.ToneMap, Burn: burnParams(p),
 		})
 	case st.segs != nil:
 		if !p.AudioCopy && p.AudioIndex >= 0 {
@@ -693,14 +766,40 @@ func (m *Manager) end(sessionID string) {
 	if !ok {
 		return
 	}
+	m.closeStream(st)
+}
+
+// closeStream impide nuevos reinicios, para el trabajo y borra su directorio.
+func (m *Manager) closeStream(st *stream) {
 	st.mu.Lock()
+	st.closed = true
 	if st.job != nil {
 		m.stopJob(st, st.job)
 	}
 	st.mu.Unlock()
 	if err := os.RemoveAll(st.dir); err != nil {
-		m.log.Warn().Err(err).Str("session_id", sessionID).Msg("no se pudo borrar el directorio del trabajo")
+		m.log.Warn().Err(err).Str("session_id", st.plan.SessionID).Msg("no se pudo borrar el directorio del trabajo")
 	}
+}
+
+// Restream sustituye el trabajo de una sesión por otro con otro plan (otra
+// pista de audio o de subtítulos, en la misma posición). El cupo no se toca:
+// pertenece a la sesión. Las peticiones en vuelo del flujo anterior terminan
+// con ErrNoStream.
+func (m *Manager) Restream(ctx context.Context, p Plan) error {
+	old, err := m.get(p.SessionID)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	delete(m.streams, p.SessionID)
+	m.mu.Unlock()
+	m.closeStream(old)
+	if err := m.Prepare(ctx, p); err != nil {
+		// Sin flujo la sesión no sirve: que la cierre quien llama.
+		return err
+	}
+	return nil
 }
 
 // Jobs devuelve los trabajos activos.

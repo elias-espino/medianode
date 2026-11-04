@@ -111,6 +111,14 @@ func (s *Server) Capabilities(w http.ResponseWriter, _ *http.Request) {
 		out.Transcoding, out.HLS = true, true
 		enc := string(s.Transcoder.Encoder())
 		out.VideoEncoder = &enc
+		out.SubtitleConversion = true
+		if c := s.FFmpeg; c != nil {
+			out.SubtitleBurnIn = c.BurnInText && c.BurnInImage
+			out.ToneMapping = c.ToneMapping
+			if c.ToneMapSpeed > 0 {
+				out.ToneMappingSpeed = &c.ToneMapSpeed
+			}
+		}
 	}
 	if p := s.Enricher.Status().Provider; p != "" {
 		out.MetadataProvider = &p

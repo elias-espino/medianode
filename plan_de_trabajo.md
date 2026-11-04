@@ -1,8 +1,8 @@
 # MediaNode — Plan de trabajo
 
-**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.8\
+**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.9\
 **Fecha:** 4 de noviembre de 2026\
-**Estado del repositorio:** alfa. Fases 0 a 8 completas y verificadas (con las salvedades de la Fase 8); la 9 (subtítulos, audio y HDR) es la siguiente
+**Estado del repositorio:** alfa. Fases 0 a 9 completas y verificadas (con las salvedades de las Fases 8 y 9); la 10 (cliente web y empaquetado) es la siguiente
 
 Este plan convierte la arquitectura en trabajo ordenado, desde el diseño
 de tablas hasta la distribución. El DDL completo vive en la sección 6.2
@@ -1851,23 +1851,103 @@ func needsToneMapping(s Stream, c ClientProfile) bool
 
 ### Tareas
 
-- [ ] Selección por idioma, forzados y `user_preferences`.
-- [ ] `/stream/.../subtitles/{id}.vtt`, por sesión.
-- [ ] Pista WebVTT dentro de HLS, con su media playlist.
-- [ ] Burn-in para texto e imagen.
-- [ ] Tone mapping y comprobación de filtros en `System Check`.
-- [ ] Completar la matriz §23.3 con PGS, VobSub y HDR.
+- [x] Selección por idioma, forzados y `user_preferences` (Fase 7).
+- [x] Conversión de pistas de texto a WebVTT con caché por archivo y pista
+      (`internal/subtitles`), fuera de la petición que la pide.
+- [x] `/stream/session/{id}/{token}/subtitles/{id}.vtt` para pistas internas y
+      para ASS externo; el ASS original sigue disponible.
+- [x] Pista WebVTT dentro de HLS, con su media playlist (`subs.m3u8`,
+      `subs.vtt`).
+- [x] Burn-in para texto (ASS vía `subtitles`) y para imagen (`overlay`).
+      **Imagen sin ejecutar con una pista real** (ver Resultado).
+- [x] Tone mapping HDR → SDR con `zscale` + `tonemap`, comprobación y
+      medición de velocidad en `ffmpeg.Probe`, y política
+      `transcoding.tone_mapping` (§10.8).
+- [x] Comprobación de filtros en `/server/capabilities` (`subtitle_conversion`,
+      `subtitle_burn_in`, `tone_mapping`, `tone_mapping_speed`).
+- [x] Mezcla a estéreo y copia de audio según el cliente (ya en la Fase 8,
+      ahora con prueba con un 5.1 real).
+- [x] Cambio de pista con `Restream` conservando la posición:
+      `POST /playback/sessions/{id}/tracks`.
+- [x] Panel: selectores de audio y subtítulos que cambian la pista en vivo.
+- [ ] Completar la matriz §23.3 con PGS, VobSub y HDR: **HDR hecho; PGS y
+      VobSub sin fixture**.
 
 ### Pruebas
 
-- Subtítulos forzados se aplican sin elección del usuario.
-- Un SRT mal codificado (Latin-1) se convierte a UTF-8.
-- La extracción no retrasa el inicio de la reproducción.
-- Un HDR10 transcodificado a SDR conserva color correcto, por comparación
-  visual y por metadatos de color de la salida.
+- [x] Subtítulos forzados se aplican sin elección del usuario (Fase 7).
+- [x] Un SRT mal codificado (Latin-1) se convierte a UTF-8 (Fase 5).
+- [x] La extracción no retrasa el inicio de la reproducción
+      (`TestLaExtraccionNoRetrasaLaSesion`: la sesión se crea en menos de
+      1,5 s con una extracción de 2 s).
+- [x] Un HDR10 transcodificado a SDR conserva color correcto, por metadatos
+      de color de la salida (`bt709`, `yuv420p`). **La comparación visual no
+      se hizo.**
+- [x] El burn-in aparece en la imagen: la zona inferior difiere de la
+      referencia 24 veces más que la superior.
+- [x] Cambiar de audio en vivo: el segmento nuevo lleva el idioma pedido, el
+      cupo no cambia y la revisión sube.
+- [x] Sin cupo, un cambio que pasa de copiar a recodificar se rechaza y la
+      sesión sigue como estaba.
+- [x] Sin los filtros necesarios, la reproducción se rechaza con un motivo.
+
+### Resultado de la Fase 9
+
+**Verificación con el binario real, el escáner real y Edge con hls.js 1.6.15:**
+21 comprobaciones (ADR 0007). Los subtítulos dentro de HLS aparecen como pista
+`spa` con sus 2 cues y los acentos intactos; cambiar de audio en vivo recarga
+la lista y sigue reproduciendo desde la posición.
+
+**Limitación medida: el tone mapping por software no llega a tiempo real en el
+equipo de desarrollo.** Intel i5-2400 (4 núcleos), 720p:
+
+| Cadena | Tiempo para 4 s de vídeo | Velocidad |
+|--------|--------------------------|-----------|
+| Solo recodificar a H.264 | 0,64 s | 6,3× |
+| Tone mapping completo | 9,1 s | 0,44× |
+| Escalar a 480p y tone mapping | 4,5 s | 0,9× |
+
+Al arrancar, el servidor lo mide (0,32× aquí) y avisa en el log.
+`transcoding.tone_mapping: realtime` rechaza el HDR en un equipo así; `auto`
+(por defecto) lo intenta. En el navegador, el HDR de 720p empieza y se corta
+(`fragLoadTimeOut`). La solución es hardware más rápido o un camino por GPU
+(`libplacebo`, `tonemap_opencl`), que no se pudo probar.
+
+**Hallazgos que solo aparecieron al probar de verdad:**
+
+1. La cadena de tone mapping fallaba con un origen sin las etiquetas de color
+   completas (`no path between colorspaces`). Ahora fija BT.2020 y la
+   transferencia con `setparams` antes de convertir.
+2. El coste del tone mapping por software (tabla anterior) no se podía deducir
+   del código: llevó a escalar antes de convertir cuando no hay subtítulos
+   grabados, a medir la velocidad al arrancar y a la política
+   `transcoding.tone_mapping`.
+
+**Pruebas de mutación:** 37 mutantes del código nuevo (filtros, extracción y
+caché de subtítulos, decisión de FFmpeg, cambio de pista, master y playlist de
+subtítulos). Mueren 35. Los 2 que sobreviven son equivalentes: quitar el
+atajo de caché de `Manager.Get` (`run` la vuelve a comprobar) y quitar el caso
+específico de `DeadlineExceeded` del handler (la rama por defecto responde
+lo mismo). La primera pasada dejó 8 supervivientes y reveló huecos reales,
+que se cerraron: la leyenda de `ffmpeg -filters`, la validación de
+parámetros antes de lanzar FFmpeg, que un subtítulo entregado aparte no se
+grabe aunque el vídeo se recodifique, y que el cambio de pista continúe donde
+iba la sesión.
+
+**Panel:** comprobado en el navegador integrado con Direct Play (el HLS no se
+puede probar ahí: rechaza las URL `blob:` de MSE). Un SRT externo da 2 cues, un
+ASS externo convertido a WebVTT da 1, y «Sin subtítulos» quita la pista.
+
+**Sin verificar:** subtítulos de imagen (PGS, VobSub) con una pista real, el
+tone mapping en hardware rápido, Safari, AVPlayer y Media3, y Dolby Vision
+perfil 5 (se vería mal: solo se usa la capa base HDR10).
 
 **Criterio de salida:** toda la matriz §23.3 pasa en un cliente de
 prueba, con audio y subtítulos cambiables durante la reproducción.
+
+**Estado del criterio:** cumplido para hls.js en Chromium con SRT, ASS, HDR10 y
+audio múltiple, con audio y subtítulos cambiables en vivo. **No cumplido** para
+PGS y VobSub (sin fixture) ni para Safari y Media3.
 
 ------------------------------------------------------------------------
 

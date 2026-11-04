@@ -111,6 +111,7 @@ func TestLoadErrores(t *testing.T) {
 		{"journal", "database:\n  journal_mode: DELETE\n", "journal_mode"},
 		{"limite", "transcoding:\n  max_concurrent_jobs: 0\n", "max_concurrent_jobs"},
 		{"aceleracion", "transcoding:\n  hardware_acceleration: cuantica\n", "hardware_acceleration"},
+		{"tone mapping", "transcoding:\n  tone_mapping: siempre\n", "tone_mapping"},
 		{"nivel de log", "logging:\n  level: ruido\n", "logging.level"},
 		{"remoto incoherente", "remote:\n  direct_enabled: true\n", "remote.enabled"},
 	}

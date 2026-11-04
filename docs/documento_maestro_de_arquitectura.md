@@ -18,7 +18,7 @@ multiplataforma
   Nombre                              MediaNode --- Technical Design
                                       Document
 
-  Versión                             1.8
+  Versión                             1.9
 
   Estado                              Propuesta técnica de referencia
                                       para iniciar el desarrollo
@@ -1568,6 +1568,27 @@ comprobar si la build de FFmpeg y el hardware disponen del filtro
 necesario. Si no lo tienen, el servidor debe informar del modo efectivo
 o rechazar la reproducción, según la política configurada.
 
+**Implementación (Fase 9, ADR 0007).** El filtro por software es
+`setparams` (BT.2020 y la transferencia del origen), `zscale` a luz lineal,
+`tonemap=hable` y `zscale` a BT.709 en 8 bits; la salida declara BT.709.
+Dolby Vision se trata por su capa base HDR10, de modo que el perfil 5 se
+vería mal. Sin subtítulos grabados, el escalado va antes del tone mapping:
+este trabaja en coma flotante y cuesta por píxel.
+
+El coste es alto. En un Intel i5-2400, un HDR de 720p se convierte a 0,44×
+tiempo real (0,32× medido al arrancar), así que la imagen se corta. Al
+arrancar, `ffmpeg.Probe` comprueba la cadena con una imagen real y mide su
+velocidad (`tone_mapping_speed` en `/server/capabilities`). La política es
+`transcoding.tone_mapping`:
+
+-   `auto` (por defecto): convierte siempre que FFmpeg pueda y avisa en el log
+    si el equipo no llega a tiempo real.
+-   `realtime`: convierte solo si el equipo llega a tiempo real.
+-   `off`: no convierte nunca.
+
+Lo que no se convierte se rechaza con `422 PLAYBACK_UNSUPPORTED` y un motivo.
+`libplacebo` y `tonemap_opencl` necesitan GPU y no están probados.
+
 # 11. Subtítulos y pistas de audio
 
 ## 11.1 Formatos
@@ -1604,6 +1625,25 @@ Extraer un subtítulo interno suele exigir leer todo el contenedor, lo
 que puede tardar minutos en un NAS. El resultado se guarda en caché por
 archivo y pista, y no debe bloquear el inicio de la reproducción.
 
+**Implementación (Fase 9, ADR 0007).**
+
+-   Una pista de texto interna (SRT, ASS/SSA, WebVTT, mov_text) o un externo
+    que no sea SRT ni WebVTT se convierte con FFmpeg a WebVTT en
+    `data/cache/subtitles/{file_id}/{track_id}.vtt`, invalidado por tamaño y
+    fecha del origen. Crear la sesión no espera: lanza la extracción. Pedir
+    el subtítulo espera hasta 25 s y, si no llega, responde `503` con
+    `Retry-After` mientras la extracción sigue. Dos extracciones a la vez
+    como máximo, y las peticiones de la misma pista comparten una.
+-   Para un cliente que solo declara `subtitle_delivery: ["hls"]`, el master
+    lleva una pista `EXT-X-MEDIA` de subtítulos con `subs.m3u8` y `subs.vtt`.
+-   **Burn-in:** el subtítulo de texto se convierte a ASS y se aplica con el
+    filtro `subtitles`; el de imagen (PGS, VobSub, DVB) se superpone con
+    `overlay` desde el propio archivo. Fuerza recodificar el vídeo. La cadena
+    de filtros va en este orden: tone mapping, subtítulos y escalado.
+-   Un formato que FFmpeg no convierte, o un FFmpeg sin el filtro necesario, se
+    rechaza con `422 PLAYBACK_UNSUPPORTED` y un motivo.
+-   Los subtítulos de imagen grabados no se han ejecutado con una pista real.
+
 La selección debe considerar: - Idioma. - Pista por defecto. - Pista
 forzada. - Preferencias del usuario. - Capacidad del cliente. -
 Posibilidad de conversión sin recodificar video.
@@ -1613,6 +1653,23 @@ Posibilidad de conversión sin recodificar video.
 Permitir: - Selección de pista. - Preferencia de idioma. -
 Identificación de canales. - Audio por defecto. - Recodificación
 independiente del video. - Información de códec y bitrate.
+
+**Cambio de pista en una sesión viva (Fase 9).**
+`POST /playback/sessions/{id}/tracks` cambia el audio o los subtítulos:
+
+-   En una sesión HLS reinicia FFmpeg con las pistas nuevas y devuelve un
+    `stream_url` con `?rev=N`; el cliente recarga la lista desde la
+    posición actual. El cupo pertenece a la sesión y no se toca; si el cambio
+    pasa de copiar a recodificar, se reserva el cupo pesado y, si no hay
+    sitio, la sesión sigue como estaba (`503` con `Retry-After`).
+-   En Direct Play el archivo llega entero y el reproductor elige el audio, así
+    que solo cambia la selección guardada y la URL del subtítulo. Si el cambio
+    exigiera remux o transcodificar, `422` y hay que crear otra sesión.
+-   El estado de la sesión vive en memoria: tras un reinicio del servidor la
+    sesión se cierra (§12.5) y el cliente crea otra.
+
+Un 5.1 se mezcla a estéreo cuando el cliente solo admite dos canales, y se
+copia cuando los admite.
 
 # 12. Sesiones y sincronización de progreso
 
@@ -2014,26 +2071,30 @@ estructurados.
 
 ### Reproducción
 
-  Método   Ruta                            Propósito
-  -------- ------------------------------- -------------------
-  POST     `/playback/sessions`            Crear sesión
-  GET      `/playback/sessions/{id}`       Consultar sesión
-  PATCH    `/playback/sessions/{id}`       Actualizar estado
-  DELETE   `/playback/sessions/{id}`       Cerrar sesión
-  PUT      `/playback/progress`            Guardar progreso
-  GET      `/playback/continue-watching`   Continuar viendo
-  GET      `/playback/history`             Historial
+  Método   Ruta                             Propósito
+  -------- -------------------------------- ---------------------------
+  POST     `/playback/sessions`             Crear sesión
+  GET      `/playback/sessions/{id}`        Consultar sesión
+  PATCH    `/playback/sessions/{id}`        Actualizar estado
+  POST     `/playback/sessions/{id}/tracks` Cambiar audio o subtítulos
+  DELETE   `/playback/sessions/{id}`        Cerrar sesión
+  PUT      `/playback/progress`             Guardar progreso
+  GET      `/playback/continue-watching`    Continuar viendo
+  GET      `/playback/history`              Historial
 
 ### Streaming
 
 Estas rutas están fuera de `/api/v1` porque el cliente no las construye:
 las recibe como URL opaca al crear la sesión.
 
-  Método      Ruta                                         Propósito
-  ----------- -------------------------------------------- ------------------
-  GET, HEAD   `/stream/session/{id}/{token}/file`          Archivo original
-  GET         `/stream/session/{id}/{token}/master.m3u8`   Manifiesto HLS
-  GET         `/stream/session/{id}/{token}/{path}`        Segmentos y pistas
+  Método      Ruta                                                 Propósito
+  ----------- ---------------------------------------------------- ---------------------------
+  GET, HEAD   `/stream/session/{id}/{token}/file`                  Archivo original
+  GET         `/stream/session/{id}/{token}/master.m3u8`           Manifiesto HLS
+  GET         `/stream/session/{id}/{token}/subs.m3u8`             Pista de subtítulos de HLS
+  GET         `/stream/session/{id}/{token}/subs.vtt`              WebVTT de esa pista
+  GET         `/stream/session/{id}/{token}/subtitles/{id}.vtt`    Subtítulo para el cliente
+  GET         `/stream/session/{id}/{token}/{path}`                Segmentos y pistas
 
 ### Usuario actual
 
@@ -2364,6 +2425,7 @@ transcoding:
   hardware_acceleration: "auto"
   cleanup_after_minutes: 30
   max_disk_gb: 20
+  tone_mapping: "auto"    # auto, realtime u off
 
 sessions:
   heartbeat_timeout_seconds: 90

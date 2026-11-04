@@ -19,6 +19,7 @@ import (
 	"medianode/internal/media"
 	"medianode/internal/protocol"
 	"medianode/internal/sessions"
+	"medianode/internal/subtitles"
 	"medianode/internal/transcoding"
 )
 
@@ -68,9 +69,14 @@ type Service struct {
 	// Transcoder e Indexer son nil sin FFmpeg: entonces solo hay Direct Play.
 	Transcoder *transcoding.Manager
 	Indexer    *transcoding.Indexer
+	// Subtitles convierte pistas de texto; nil sin FFmpeg. Features dice qué
+	// filtros tiene el FFmpeg instalado (burn-in y tone mapping).
+	Subtitles *subtitles.Manager
+	Features  Features
 
 	mu       sync.Mutex
 	verified map[string]time.Time // Sesión → última autorización correcta.
+	states   map[string]*sessionState
 }
 
 // NewService crea el servicio.
@@ -192,6 +198,7 @@ func (s *Service) CreateSession(ctx context.Context, actor authorization.Actor, 
 		Session: sess, Decision: best.decision, File: best.file, Tracks: best.tracks,
 		Container: deref(best.file.Container), StreamURL: base + "/file",
 	}
+	s.remember(sess.ID, &sessionState{req: req, profile: profile, mode: best.decision.Mode, kind: kind})
 	if kind != "" {
 		plan, err := s.plan(ctx, sess, best, kind, profile, req)
 		if err == nil {
@@ -210,13 +217,7 @@ func (s *Service) CreateSession(ctx context.Context, actor authorization.Actor, 
 			resp.OutputHeight, resp.OutputBitrate = plan.Height, plan.VideoBitrate
 		}
 	}
-	if ex := best.tracks.External; ex != nil && (best.decision.Subtitle == SubSidecar || best.decision.Subtitle == SubConvert) {
-		ext := "vtt"
-		if best.decision.Subtitle == SubSidecar {
-			ext = protocol.CodecName(deref(ex.Format))
-		}
-		resp.SubtitleURL = base + "/subtitles/" + ex.ID + "." + ext
-	}
+	resp.SubtitleURL = s.subtitleURL(ctx, base, best)
 	s.log.Info().Str("session_id", sess.ID).Str("item_id", req.ItemID).Str("file_id", best.file.ID).
 		Str("platform", profile.Platform).Str("mode", string(best.decision.Mode)).
 		Str("video", string(best.decision.VideoAction)).Str("audio", string(best.decision.AudioAction)).
@@ -256,6 +257,12 @@ func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, ki
 	codecs := []string{}
 	if kind == transcoding.Heavy {
 		p.Height, p.VideoBitrate = outputProfile(o.tracks.Video.Height, c.MaxResolution, req.MaxResolution, req.MaxBitrate)
+		if needsToneMap(o.decision) {
+			p.ToneMap = hdrTransfer(o.tracks.Video)
+		}
+		if err := s.burnPlan(ctx, o.file.ID, o, &p); err != nil {
+			return transcoding.Plan{}, err
+		}
 		p.Variant = transcoding.Variant{Bandwidth: p.VideoBitrate + audioBitrate, Width: scaledWidth(o.tracks.Video, p.Height), Height: p.Height}
 		codecs = append(codecs, encodedCodecs(p.Height))
 	} else {
@@ -268,6 +275,7 @@ func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, ki
 		p.Variant = transcoding.Variant{Bandwidth: int(max(deref64(o.file.Bitrate), 1)), Width: int(deref64(v.Width)), Height: int(deref64(v.Height))}
 		codecs = append(codecs, videoCodecs(v))
 	}
+	p.Variant.Subtitle = s.hlsSubtitle(ctx, o.file.ID, o)
 	if ac := audioCodecs(o.tracks.Audio, p.AudioCopy); ac != "" || o.tracks.Audio == nil {
 		// Un códec desconocido deja CODECS vacío entero: incompleto es peor.
 		if codecs[0] != "" {
@@ -280,28 +288,47 @@ func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, ki
 	return p, nil
 }
 
-// unsupported devuelve por qué la decisión necesita algo que el servidor aún
-// no ofrece, o vacío. Quemar subtítulos, extraer pistas internas, convertir
-// ASS y el tone mapping HDR llegan en la Fase 9; la entrega progresiva por
+// unsupported devuelve por qué la decisión necesita algo que este servidor no
+// tiene (FFmpeg, o un filtro de FFmpeg), o vacío. La entrega progresiva por
 // HTTP sin HLS no está prevista.
 func (s *Service) unsupported(o option) string {
 	d := o.decision
+	format, external := "", false
 	switch {
-	case d.Subtitle == SubBurnIn || d.Subtitle == SubHLS:
-		return "El subtítulo elegido necesita FFmpeg para quemarse o ir en HLS, que aún no está disponible"
-	case d.Subtitle == SubConvert && (o.tracks.External == nil || protocol.CodecName(deref(o.tracks.External.Format)) != "srt"):
-		return "Convertir este subtítulo aún no está disponible; prueba otro o desactívalos"
+	case o.tracks.Internal != nil:
+		format = protocol.CodecName(deref(o.tracks.Internal.Codec))
+	case o.tracks.External != nil:
+		format, external = protocol.CodecName(deref(o.tracks.External.Format)), true
+	}
+	switch d.Subtitle {
+	case SubBurnIn:
+		switch {
+		case s.Transcoder == nil:
+			return "FFmpeg no está disponible en el servidor"
+		case protocol.ImageSubtitle(format) && (external || !s.Features.BurnInImage):
+			return "Este FFmpeg no puede grabar subtítulos de imagen; prueba otro o desactívalos"
+		case !protocol.ImageSubtitle(format) && (!s.Features.BurnInText || s.Subtitles == nil):
+			return "Este FFmpeg no puede grabar subtítulos de texto; prueba otro o desactívalos"
+		}
+	case SubHLS, SubConvert:
+		switch {
+		case !textFormats[format]:
+			return "Este formato de subtítulo no se puede convertir; prueba otro o desactívalos"
+		case d.Subtitle == SubConvert && external && (format == "srt" || format == "vtt"):
+			// Se convierte sin FFmpeg.
+		case s.Subtitles == nil:
+			return "Convertir este subtítulo necesita FFmpeg, que no está disponible"
+		}
+	}
+	switch {
 	case d.Mode == DirectPlay:
 		return ""
 	case s.Transcoder == nil:
 		return "FFmpeg no está disponible en el servidor"
 	case d.Protocol != protocol.ProtocolHLS:
 		return "Este archivo necesita remux o transcodificación, y el cliente no admite HLS"
-	}
-	for _, r := range d.Reasons {
-		if r.Code == ReasonHDR {
-			return "El vídeo es HDR y el cliente no; el tone mapping llega más adelante"
-		}
+	case needsToneMap(d) && !s.Features.ToneMapping:
+		return "El vídeo es HDR y el cliente no, y este servidor no puede convertirlo a SDR (FFmpeg sin tone mapping, desactivado o demasiado lento: transcoding.tone_mapping)"
 	}
 	return ""
 }
@@ -424,6 +451,7 @@ func (s *Service) checkStream(ctx context.Context, sess *sessions.Session) error
 func (s *Service) OnSessionEnded(sess sessions.Session) {
 	s.mu.Lock()
 	delete(s.verified, sess.ID)
+	delete(s.states, sess.ID)
 	s.mu.Unlock()
 }
 

@@ -217,8 +217,9 @@ func (h *Stream) File(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", info.ModTime(), &touchReader{ReadSeeker: f, touch: func() { h.Sessions.Touch(s.ID) }})
 }
 
-// Subtitle entrega un subtítulo externo del archivo de la sesión: tal cual, o
-// convertido a WebVTT si se pide .vtt de un SRT.
+// Subtitle entrega un subtítulo del archivo de la sesión: un externo tal cual,
+// o convertido a WebVTT si se pide .vtt, y una pista interna de texto siempre
+// como WebVTT (extraída con FFmpeg).
 func (h *Stream) Subtitle(w http.ResponseWriter, r *http.Request) {
 	s := h.session(w, r)
 	if s == nil {
@@ -227,15 +228,27 @@ func (h *Stream) Subtitle(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	id, ext := strings.TrimSuffix(name, path.Ext(name)), strings.TrimPrefix(path.Ext(name), ".")
 	sub, err := h.DB.R.GetExternalSubtitle(r.Context(), id)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && sub.MediaFileID != s.FileID) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// Una pista interna solo existe como WebVTT.
+		if ext != "vtt" {
+			api.WriteError(w, r, core.ErrNotFound())
+			return
+		}
+		h.writeVTT(w, r, s, id)
+		return
+	case err == nil && sub.MediaFileID != s.FileID:
 		api.WriteError(w, r, core.ErrNotFound()) // Un subtítulo de otro archivo no existe para esta sesión.
 		return
-	}
-	if err != nil {
+	case err != nil:
 		api.WriteFailure(w, r, h.Log, err)
 		return
 	}
 	format := protocol.CodecName(deref(sub.Format))
+	if ext == "vtt" && format != "vtt" && format != "srt" && playback.IsTextSubtitle(format) {
+		h.writeVTT(w, r, s, id) // ASS y similares: los convierte FFmpeg.
+		return
+	}
 	if ext != format && (ext != "vtt" || format != "srt") {
 		api.WriteError(w, r, core.ErrNotFound())
 		return
@@ -270,6 +283,72 @@ func (h *Stream) Subtitle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(data)
+}
+
+// writeVTT entrega la pista id convertida a WebVTT. Mientras FFmpeg la
+// extrae, la petición espera; si tarda demasiado responde 503 con
+// Retry-After y la extracción sigue para el siguiente intento.
+func (h *Stream) writeVTT(w http.ResponseWriter, r *http.Request, s *sessions.Session, id string) {
+	p, err := h.Playback.SubtitleVTT(r.Context(), s.FileID, id)
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled):
+		return
+	case errors.Is(err, context.DeadlineExceeded):
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+		return
+	case errors.Is(err, subtitles.ErrNoExtractor):
+		api.WriteError(w, r, core.ErrNotFound())
+		return
+	case core.CodeOf(err) != "":
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	default:
+		h.Log.Warn().Err(err).Str("subtitle_id", id).Msg("no se pudo convertir el subtítulo")
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+		return
+	}
+	f, err := os.Open(p) //nolint:gosec // ruta de la caché de subtítulos, construida por subtitles.Manager
+	if err != nil {
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+		return
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, subtitles.MaxBytes+1))
+	if err != nil || len(data) > subtitles.MaxBytes {
+		api.WriteError(w, r, core.ErrFileUnavailable())
+		return
+	}
+	w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data) //nolint:gosec // text/vtt con nosniff: el navegador no lo interpreta como HTML
+}
+
+// SubtitlePlaylist entrega la playlist de la pista WebVTT que va dentro de
+// HLS (subs.m3u8).
+func (h *Stream) SubtitlePlaylist(w http.ResponseWriter, r *http.Request) {
+	s := h.hlsSession(w, r)
+	if s == nil {
+		return
+	}
+	data, err := h.Transcoder.SubtitlePlaylist(s.ID)
+	h.writePlaylist(w, r, data, err)
+}
+
+// SubtitleTrack entrega el WebVTT que referencia subs.m3u8: la pista elegida
+// al crear la sesión.
+func (h *Stream) SubtitleTrack(w http.ResponseWriter, r *http.Request) {
+	s := h.hlsSession(w, r)
+	if s == nil {
+		return
+	}
+	id, err := h.Transcoder.SubtitleTrackID(s.ID)
+	if err != nil {
+		api.WriteError(w, r, core.ErrNotFound())
+		return
+	}
+	h.writeVTT(w, r, s, id)
 }
 
 // touchReader registra actividad mientras se lee: un reproductor en pausa con

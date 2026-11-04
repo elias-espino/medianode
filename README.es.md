@@ -42,17 +42,29 @@ guardar los datos y ningún servicio externo obligatorio.
   Los trabajos simultáneos tienen límite (`transcoding.max_concurrent_jobs`), el
   servidor responde `503` con `Retry-After` cuando está lleno, y FFmpeg no
   sobrevive al servidor en Windows ni en Linux.
+- **Subtítulos y audio.** Los subtítulos de texto, internos o externos (SRT,
+  ASS, WebVTT), se convierten a WebVTT, se entregan junto al vídeo o dentro de
+  HLS, o se graban en la imagen cuando el cliente no puede mostrarlos. El audio
+  envolvente se mezcla a estéreo para los clientes que solo lo admiten. Se puede
+  cambiar de audio y de subtítulos mientras se reproduce, desde la misma
+  posición.
+- **HDR a SDR.** Un vídeo HDR se convierte para los clientes que no pueden
+  mostrarlo. Por software es caro: el servidor mide su velocidad al arrancar y
+  `transcoding.tone_mapping` (`auto`, `realtime`, `off`) decide qué hacer si el
+  equipo no llega.
 - **Panel web.** Un panel en React incrustado en el binario: asistente de primer
   arranque, bibliotecas, usuarios, metadatos, búsqueda y un reproductor (Direct
-  Play y HLS con hls.js).
+  Play y HLS con hls.js) con selectores de audio y subtítulos.
 
-**Aún no está:** extraer y grabar subtítulos en la imagen, tone mapping de HDR,
-clientes nativos para móvil y televisor, DLNA, descubrimiento en la red local,
-acceso remoto, TLS e instaladores. El HLS se ha verificado en Chromium con
-hls.js; los reproductores de Safari, iOS y Android no se han probado, y solo se
-ha probado la codificación por software (libx264): los codificadores por
-hardware se detectan pero no están verificados. En macOS, FFmpeg puede quedar
-vivo si el servidor muere de golpe.
+**Aún no está:** clientes nativos para móvil y televisor, DLNA, descubrimiento en
+la red local, acceso remoto, TLS e instaladores. El HLS se ha verificado en
+Chromium con hls.js; los reproductores de Safari, iOS y Android no se han
+probado, y solo se ha probado la codificación por software (libx264): los
+codificadores por hardware se detectan pero no están verificados. Grabar
+subtítulos de imagen (PGS, VobSub) está implementado pero no se ha ejecutado con
+una pista real. En el equipo de desarrollo (un i5 antiguo de 4 núcleos), el tone
+mapping de HDR por software va a un tercio del tiempo real y no se reproduce con
+fluidez. En macOS, FFmpeg puede quedar vivo si el servidor muere de golpe.
 
 ## Requisitos
 

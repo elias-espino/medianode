@@ -87,6 +87,11 @@ type EncodeParams struct {
 	StartSegment   int    // floor(start / segmento): StartMS debe ser StartSegment × segmento.
 	InitName       string // init de este trabajo; cambia en cada reinicio.
 	Playlist       string // Lista interna de FFmpeg; no se entrega al cliente.
+	// ToneMap es la función de transferencia HDR del origen (TransferPQ o
+	// TransferHLG) cuando la salida es SDR; vacío sin tone mapping.
+	ToneMap string
+	// Burn graba un subtítulo en la imagen.
+	Burn Burn
 }
 
 // CopyParams es un trabajo que copia el vídeo: MPEG-TS con el muxer segment y
@@ -118,7 +123,7 @@ func common(in Input) []string {
 }
 
 // file: evita que un nombre como «concat:...» se tome como protocolo.
-func inputArgs(in Input, seek string) []string {
+func inputOnly(in Input, seek string) []string {
 	args := []string{}
 	if seek != "" {
 		args = append(args, "-ss", seek)
@@ -126,14 +131,27 @@ func inputArgs(in Input, seek string) []string {
 	if in.LimitUS > 0 {
 		args = append(args, "-t", secondsUS(in.LimitUS))
 	}
-	args = append(args, "-i", "file:"+in.Path)
-	if in.Video >= 0 {
+	return append(args, "-i", "file:"+in.Path)
+}
+
+// mapArgs selecciona las pistas; videoMap sustituye al mapa del vídeo cuando
+// sale de un filter_complex.
+func mapArgs(in Input, videoMap string) []string {
+	var args []string
+	switch {
+	case videoMap != "":
+		args = append(args, "-map", videoMap)
+	case in.Video >= 0:
 		args = append(args, "-map", "0:"+strconv.Itoa(in.Video))
 	}
 	if in.Audio >= 0 {
 		args = append(args, "-map", "0:"+strconv.Itoa(in.Audio))
 	}
 	return args
+}
+
+func inputArgs(in Input, seek string) []string {
+	return append(inputOnly(in, seek), mapArgs(in, "")...)
 }
 
 func audioArgs(a Audio, hasAudio bool) []string {
@@ -195,10 +213,20 @@ func BuildEncode(p EncodeParams) ([]string, error) {
 	if p.StartMS > 0 {
 		seek = seconds(p.StartMS)
 	}
-	args := append(common(p.Input), inputArgs(p.Input, seek)...)
-	if p.Height > 0 {
-		// -2 conserva la proporción con un ancho par, que exige yuv420p.
-		args = append(args, "-vf", "scale=-2:"+strconv.Itoa(p.Height))
+	graph, err := videoGraph(p)
+	if err != nil {
+		return nil, err
+	}
+	args := append(common(p.Input), inputOnly(p.Input, seek)...)
+	switch {
+	case graph.complex != "":
+		args = append(args, "-filter_complex", graph.complex)
+		args = append(args, mapArgs(p.Input, "[v]")...)
+	default:
+		args = append(args, mapArgs(p.Input, "")...)
+		if graph.simple != "" {
+			args = append(args, "-vf", graph.simple)
+		}
 	}
 	args = append(args, encoderArgs(p.Encoder, p.VideoBitrate)...)
 	args = append(args, "-force_key_frames", "expr:gte(t,n_forced*"+seg+")")

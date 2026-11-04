@@ -10,6 +10,10 @@ INSERT INTO playback_sessions (
 -- name: GetSession :one
 SELECT * FROM playback_sessions WHERE id = ?1;
 
+-- name: UpdateSessionTracks :execrows
+UPDATE playback_sessions SET selected_audio_stream_id = ?2, selected_subtitle_id = ?3
+WHERE id = ?1 AND ended_at IS NULL;
+
 -- name: SetSessionStatus :exec
 UPDATE playback_sessions SET status = ?2 WHERE id = ?1 AND ended_at IS NULL;
 

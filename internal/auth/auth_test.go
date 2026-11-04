@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -362,20 +361,22 @@ func TestLoginSinUsuarioTardaLoMismoQueConContrasenaErronea(t *testing.T) {
 	f := newFixture(t, DefaultParams)
 	f.owner()
 
-	median := func(username string) time.Duration {
-		samples := make([]time.Duration, 5)
-		for i := range samples {
-			f.s.accounts = NewLimiter(accountAttemptsPerMinute)
-			start := time.Now()
-			_, err := f.s.Login(f.ctx, username, "errónea", testDevice)
-			samples[i] = time.Since(start)
-			wantCode(t, err, core.CodeInvalidCredentials)
-		}
-		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
-		return samples[len(samples)/2]
+	// Se alternan las muestras y se compara la más rápida de cada una: con otras
+	// pruebas ocupando la CPU, la mediana de una serie entera se dispara, pero
+	// el mejor intento de cada usuario sigue mostrando el coste del hash.
+	attempt := func(username string) time.Duration {
+		f.s.accounts = NewLimiter(accountAttemptsPerMinute)
+		start := time.Now()
+		_, err := f.s.Login(f.ctx, username, "errónea", testDevice)
+		d := time.Since(start)
+		wantCode(t, err, core.CodeInvalidCredentials)
+		return d
 	}
-
-	existing, missing := median(testUser), median("inexistente")
+	existing, missing := time.Duration(1<<62), time.Duration(1<<62)
+	for range 7 {
+		existing = min(existing, attempt(testUser))
+		missing = min(missing, attempt("inexistente"))
+	}
 	if missing < existing/2 || missing > existing*2 {
 		t.Fatalf("usuario existente %v, inexistente %v", existing, missing)
 	}

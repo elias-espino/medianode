@@ -330,6 +330,59 @@ func TestMediaDeTrabajoFallidoNoLlevaEndlist(t *testing.T) {
 	}
 }
 
+// Restream sustituye el trabajo por otro plan: el FFmpeg anterior termina, el
+// directorio se renueva y el flujo viejo ya no puede reiniciar nada.
+func TestRestreamSustituyeElTrabajo(t *testing.T) {
+	tl := needTools(t)
+	f := newManager(t, tl)
+	src := fixture(t, "mkv_multi_audio.mkv")
+	ctx := context.Background()
+	plan := Plan{SessionID: "s8", FileID: "f8", Path: src, DurationUS: 4_000_000, Kind: Heavy,
+		VideoIndex: 0, AudioIndex: 1, Height: 360, VideoBitrate: 800_000}
+	if err := f.m.Prepare(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.m.File(ctx, "s8", "seg_00000.m4s"); err != nil {
+		t.Fatal(err)
+	}
+	oldStream, err := f.m.get("s8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldJob := f.job("s8")
+
+	plan.AudioIndex = 2
+	if err := f.m.Restream(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !isDone(oldJob) {
+		t.Fatal("el FFmpeg anterior debía haber terminado")
+	}
+	cur, err := f.m.get("s8")
+	if err != nil || cur == oldStream || cur.plan.AudioIndex != 2 {
+		t.Fatalf("el flujo no se sustituyó: %v", err)
+	}
+	// El cupo es de la sesión: Restream no lo toca.
+	if _, err := f.m.File(ctx, "s8", "seg_00000.m4s"); err != nil {
+		t.Fatalf("el flujo nuevo debía servir: %v", err)
+	}
+	// Una petición en vuelo del flujo anterior no puede arrancar FFmpeg.
+	oldStream.mu.Lock()
+	err = f.m.restart(oldStream, 0)
+	oldStream.mu.Unlock()
+	if !errors.Is(err, ErrNoStream) {
+		t.Fatalf("restart sobre un flujo cerrado = %v", err)
+	}
+	if _, err := os.Stat(oldStream.dir); err != nil {
+		// El directorio es el mismo (misma sesión): lo recrea el flujo nuevo.
+		t.Fatalf("falta el directorio del flujo nuevo: %v", err)
+	}
+	// Restream de una sesión que no existe falla sin crear nada.
+	if err := f.m.Restream(ctx, Plan{SessionID: "no-existe"}); !errors.Is(err, ErrNoStream) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 // 20 saltos seguidos no dejan procesos huérfanos.
 func TestVeinteSaltosSinHuerfanos(t *testing.T) {
 	tl := needTools(t)

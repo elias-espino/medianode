@@ -589,6 +589,25 @@ func (q *Queries) SetSessionStatus(ctx context.Context, arg SetSessionStatusPara
 	return err
 }
 
+const updateSessionTracks = `-- name: UpdateSessionTracks :execrows
+UPDATE playback_sessions SET selected_audio_stream_id = ?2, selected_subtitle_id = ?3
+WHERE id = ?1 AND ended_at IS NULL
+`
+
+type UpdateSessionTracksParams struct {
+	ID                    string
+	SelectedAudioStreamID *string
+	SelectedSubtitleID    *string
+}
+
+func (q *Queries) UpdateSessionTracks(ctx context.Context, arg UpdateSessionTracksParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateSessionTracks, arg.ID, arg.SelectedAudioStreamID, arg.SelectedSubtitleID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const upsertProgress = `-- name: UpsertProgress :execrows
 INSERT INTO playback_progress
     (user_id, media_item_id, position_ms, duration_ms, completed, updated_at)

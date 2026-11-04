@@ -11,7 +11,7 @@ test:
 
 # -race necesita CGO y un compilador de C, aunque el servidor no use CGO.
 test-race:
-	CGO_ENABLED=1 go test -race ./...
+	CGO_ENABLED=1 go test -race -timeout 25m ./...
 
 lint:
 	golangci-lint run

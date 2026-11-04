@@ -24,6 +24,7 @@ import (
 	"medianode/internal/database"
 	"medianode/internal/devices"
 	"medianode/internal/events"
+	"medianode/internal/ffmpeg"
 	"medianode/internal/images"
 	"medianode/internal/libraries"
 	"medianode/internal/media"
@@ -34,6 +35,7 @@ import (
 	"medianode/internal/readmodel"
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
+	"medianode/internal/subtitles"
 	"medianode/internal/testutil"
 	"medianode/internal/transcoding"
 	"medianode/internal/users"
@@ -112,6 +114,7 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 	sm.AddListener(ps)
 	var tm *transcoding.Manager
 	var indexer *transcoding.Indexer
+	var caps *ffmpeg.Capabilities
 	if eo.ffmpeg != "" {
 		tm = transcoding.NewManager(transcoding.Options{
 			FFmpeg: eo.ffmpeg, Dir: t.TempDir(), SegmentSeconds: 6, RestartSegments: 5, WaitTimeout: 30 * time.Second,
@@ -128,6 +131,9 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 		}
 		t.Cleanup(func() { _ = indexer.Stop(context.Background()) })
 		ps.Indexer = indexer
+		ps.Subtitles = subtitles.NewManager(eo.ffmpeg, t.TempDir(), log)
+		caps = probeFFmpeg(t, eo.ffmpeg)
+		ps.Features = playback.FeaturesOf(caps)
 	}
 	return &env{t: t, code: code, logs: logs, db: db, imgDir: imgDir, sessions: sm, bus: bus, auth: a, devices: ds, playback: ps,
 		transcoder: tm, indexer: indexer, h: NewRouter(Deps{
@@ -136,7 +142,7 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 			Catalog: readmodel.New(db, authz), Metadata: metadata.NewService(db, authz, enricher),
 			Enricher: enricher, Images: imgs, Started: time.Now(),
 			Sessions: sm, Progress: sessions.NewProgress(db, authz, bus, 0.9), Bus: bus, Authorizer: authz,
-			Playback: ps, DB: db, Transcoder: tm,
+			Playback: ps, DB: db, Transcoder: tm, FFmpeg: caps,
 		})}
 }
 

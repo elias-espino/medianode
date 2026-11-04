@@ -49,6 +49,10 @@ transcoding:
   segment_seconds: 6
   seek_restart_segments: 5
   hardware_acceleration: "auto"
+  # HDR que el cliente no admite: auto lo convierte a SDR cuando FFmpeg puede
+  # (avisa si este equipo no llega a tiempo real); realtime, solo si llega;
+  # off, nunca. La conversión por software es cara.
+  tone_mapping: "auto"
   cleanup_after_minutes: 30
   max_disk_gb: 20
 

@@ -100,8 +100,12 @@ type Transcoding struct {
 	SegmentSeconds         int    `yaml:"segment_seconds"`
 	SeekRestartSegments    int    `yaml:"seek_restart_segments"`
 	HardwareAcceleration   string `yaml:"hardware_acceleration"`
-	CleanupAfterMinutes    int    `yaml:"cleanup_after_minutes"`
-	MaxDiskGB              int    `yaml:"max_disk_gb"`
+	// ToneMapping decide qué hacer con un HDR que el cliente no admite (§10.8):
+	// auto lo convierte siempre que FFmpeg pueda; realtime, solo si este equipo
+	// lo convierte al menos a tiempo real; off no lo convierte nunca.
+	ToneMapping         string `yaml:"tone_mapping"`
+	CleanupAfterMinutes int    `yaml:"cleanup_after_minutes"`
+	MaxDiskGB           int    `yaml:"max_disk_gb"`
 }
 
 // Sessions agrupa los tiempos de sesión.
@@ -154,6 +158,7 @@ func Default() *Config {
 			SegmentSeconds:         6,
 			SeekRestartSegments:    5,
 			HardwareAcceleration:   "auto",
+			ToneMapping:            "auto",
 			CleanupAfterMinutes:    30,
 			MaxDiskGB:              20,
 		},
@@ -398,6 +403,10 @@ func (c *Config) Validate() error {
 	accel := []string{"auto", "none", "nvenc", "qsv", "vaapi", "amf", "videotoolbox"}
 	if !slices.Contains(accel, c.Transcoding.HardwareAcceleration) {
 		fail("transcoding.hardware_acceleration inválido: %q", c.Transcoding.HardwareAcceleration)
+	}
+
+	if !slices.Contains([]string{"auto", "realtime", "off"}, c.Transcoding.ToneMapping) {
+		fail("transcoding.tone_mapping inválido: %q", c.Transcoding.ToneMapping)
 	}
 
 	if (c.Remote.DirectEnabled || c.Remote.RelayEnabled || c.Remote.AdminEnabled) && !c.Remote.Enabled {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // Segment es un segmento de la playlist: inicio y duración en microsegundos.
@@ -113,7 +114,20 @@ type Variant struct {
 	Width     int
 	Height    int
 	Codecs    string // Vacío si no se conoce: el reproductor lo deduce.
+	// Subtitle, si no es nil, añade una pista WebVTT al master (subs.m3u8).
+	Subtitle *SubtitleRef
 }
+
+// SubtitleRef describe la pista de subtítulos que viaja dentro de HLS.
+type SubtitleRef struct {
+	ID       string // Pista o subtítulo externo que se entrega.
+	Name     string
+	Language string // Código corto; vacío si se desconoce.
+	Forced   bool
+}
+
+// subtitleGroup es el GROUP-ID de la pista de subtítulos del master.
+const subtitleGroup = "subs"
 
 // MasterPlaylist apunta a la playlist de medios.
 func MasterPlaylist(v Variant) []byte {
@@ -126,7 +140,48 @@ func MasterPlaylist(v Variant) []byte {
 	if v.Codecs != "" {
 		attrs += fmt.Sprintf(",CODECS=%q", v.Codecs)
 	}
+	if v.Subtitle != nil {
+		media := fmt.Sprintf("TYPE=SUBTITLES,GROUP-ID=%q,NAME=%q,DEFAULT=YES,AUTOSELECT=YES,FORCED=%s,URI=%q",
+			subtitleGroup, hlsQuoted(v.Subtitle.Name, "Subtítulos"), yesNo(v.Subtitle.Forced), "subs.m3u8")
+		if lang := hlsQuoted(v.Subtitle.Language, ""); lang != "" {
+			media += fmt.Sprintf(",LANGUAGE=%q", lang)
+		}
+		fmt.Fprintf(&b, "#EXT-X-MEDIA:%s\n", media)
+		attrs += fmt.Sprintf(",SUBTITLES=%q", subtitleGroup)
+	}
 	fmt.Fprintf(&b, "#EXT-X-STREAM-INF:%s\nmedia.m3u8\n", attrs)
+	return b.Bytes()
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "YES"
+	}
+	return "NO"
+}
+
+// hlsQuoted deja un texto apto para un atributo entre comillas: sin comillas,
+// barras ni saltos de línea, que romperían la playlist.
+func hlsQuoted(s, fallback string) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, s)
+	if s = strings.TrimSpace(s); s == "" {
+		return fallback
+	}
+	return s
+}
+
+// SubtitlePlaylist es la playlist de medios de la pista de subtítulos: un solo
+// segmento WebVTT con todo el archivo, que dura lo que el vídeo.
+func SubtitlePlaylist(durationUS int64) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:%d\n", max(int(math.Ceil(float64(durationUS)/1e6)), 1))
+	b.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MEDIA-SEQUENCE:0\n")
+	fmt.Fprintf(&b, "#EXTINF:%.6f,\nsubs.vtt\n#EXT-X-ENDLIST\n", float64(max(durationUS, 1_000_000))/1e6)
 	return b.Bytes()
 }
 
