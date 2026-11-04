@@ -211,7 +211,7 @@ func (w *Watcher) addTree(fsw *fsnotify.Watcher, dir string) {
 	depth := strings.Count(filepath.Clean(dir), string(filepath.Separator))
 	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
-			return nil
+			return nil //nolint:nilerr // una carpeta ilegible no detiene el recorrido: se vigila el resto
 		}
 		name := d.Name()
 		if p != dir && (strings.HasPrefix(name, ".") || skippedDirs[strings.ToLower(name)]) {

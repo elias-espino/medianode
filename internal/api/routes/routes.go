@@ -26,6 +26,7 @@ import (
 	"medianode/internal/playback"
 	"medianode/internal/readmodel"
 	"medianode/internal/sessions"
+	"medianode/internal/transcoding"
 	"medianode/internal/users"
 )
 
@@ -53,6 +54,7 @@ type Deps struct {
 	Sessions       *sessions.Manager
 	Progress       *sessions.Progress
 	Playback       *playback.Service
+	Transcoder     *transcoding.Manager
 	DB             *database.DB
 	Bus            *events.Bus
 	Authorizer     *authorization.Authorizer
@@ -85,11 +87,12 @@ func NewRouter(deps Deps) http.Handler {
 
 	server := &handlers.Server{
 		Name: deps.Name, Version: deps.Version, Log: deps.Log, SetupRequired: deps.Auth.SetupRequired,
-		Started: deps.Started, FFprobeAvailable: deps.FFprobe, Catalog: deps.Catalog, Enricher: deps.Enricher,
+		Started: deps.Started, FFprobeAvailable: deps.FFprobe, Transcoder: deps.Transcoder, Catalog: deps.Catalog, Enricher: deps.Enricher,
 	}
 	mediaH := &handlers.Media{Catalog: deps.Catalog, Metadata: deps.Metadata, Images: deps.Images, Log: deps.Log}
 	playbackH := &handlers.Playback{Sessions: deps.Sessions, Progress: deps.Progress, Playback: deps.Playback, Log: deps.Log}
-	streamH := &handlers.Stream{DB: deps.DB, Sessions: deps.Sessions, Playback: deps.Playback, Log: deps.Log}
+	adminH := &handlers.Admin{Transcoder: deps.Transcoder, Sessions: deps.Sessions, Log: deps.Log}
+	streamH := &handlers.Stream{DB: deps.DB, Sessions: deps.Sessions, Playback: deps.Playback, Transcoder: deps.Transcoder, Log: deps.Log}
 	eventsH := &websocket.Handler{
 		Bus: deps.Bus, Libs: deps.Authorizer, Authenticate: deps.Auth.Authenticate,
 		Origins: deps.CORSOrigins, Log: deps.Log,
@@ -106,6 +109,10 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/file", streamH.File)
 		r.Head("/file", streamH.File)
 		r.Get("/subtitles/{name}", streamH.Subtitle)
+		// HLS: las rutas fijas van antes que el comodín de segmentos.
+		r.Get("/master.m3u8", streamH.Master)
+		r.Get("/media.m3u8", streamH.Media)
+		r.Get("/{name}", streamH.Segment)
 	})
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/server/info", server.Info)
@@ -180,6 +187,8 @@ func NewRouter(deps Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireRole(media.RoleAdmin))
 
+				r.Get("/admin/transcodes", adminH.Transcodes)
+				r.Post("/admin/transcodes/{id}/cancel", adminH.CancelTranscode)
 				r.Get("/admin/users", usersH.List)
 				r.Post("/admin/users", usersH.Create)
 				r.Get("/admin/users/{id}", usersH.Get)

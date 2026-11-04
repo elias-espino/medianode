@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -71,9 +70,6 @@ type fixtureEnv struct {
 	tl  tools
 	bus *events.Bus
 	db  *database.DB
-
-	mu   sync.Mutex
-	pids []int
 }
 
 func newManager(t *testing.T, tl tools) *fixtureEnv {

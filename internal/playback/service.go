@@ -313,15 +313,7 @@ func (s *Service) evaluate(ctx context.Context, f sqlc.ListItemFilesRow, req Req
 	if err != nil {
 		return option{}, fmt.Errorf("leer subtítulos: %w", err)
 	}
-	ms := make([]sqlc.MediaStream, len(streams))
-	for i, st := range streams {
-		ms[i] = sqlc.MediaStream(st)
-	}
-	ss := make([]sqlc.Subtitle, len(subs))
-	for i, sb := range subs {
-		ss[i] = sqlc.Subtitle(sb)
-	}
-	tracks, err := selectTracks(ms, ss, req.AudioStreamID, req.SubtitleID, p)
+	tracks, err := selectTracks(streams, subs, req.AudioStreamID, req.SubtitleID, p)
 	if err != nil {
 		return option{}, err
 	}

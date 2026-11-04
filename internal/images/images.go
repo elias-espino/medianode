@@ -159,7 +159,7 @@ func (m *Manager) download(ctx context.Context, url string) ([]byte, string, err
 	}
 	resp, err := m.http.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrTransient, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrTransient, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
@@ -170,7 +170,7 @@ func (m *Manager) download(ctx context.Context, url string) ([]byte, string, err
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %v", ErrTransient, err)
+		return nil, "", fmt.Errorf("%w: %w", ErrTransient, err)
 	}
 	if len(data) > maxImageBytes {
 		return nil, "", errors.New("imagen demasiado grande")

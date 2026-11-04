@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,7 +19,7 @@ func chain(log zerolog.Logger, h http.Handler) http.Handler {
 }
 
 func TestRecoverDevuelve500Estructurado(t *testing.T) {
-	var logs bytes.Buffer
+	var logs syncBuffer
 	h := chain(zerolog.New(&logs), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("fallo con ruta secreta C:\\medios\\peli.mkv")
 	}))
@@ -79,7 +78,7 @@ func TestRecoverRespetaErrAbortHandler(t *testing.T) {
 }
 
 func TestAccessLogNoExponeSecretos(t *testing.T) {
-	var logs bytes.Buffer
+	var logs syncBuffer
 	h := chain(zerolog.New(&logs), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -112,7 +111,7 @@ func TestAccessLogNivelPorEstado(t *testing.T) {
 		{"/health", http.StatusOK, "debug"},
 	}
 	for _, c := range cases {
-		var logs bytes.Buffer
+		var logs syncBuffer
 		h := chain(zerolog.New(&logs), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(c.status)
 		}))

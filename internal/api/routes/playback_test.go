@@ -392,7 +392,7 @@ func TestClienteSimuladoConCaida(t *testing.T) {
 	rec, _ = restarted.do(call{method: http.MethodDelete, path: apiBase + "/playback/sessions/" + second, bearer: own.token})
 	e.want(rec, http.StatusNoContent)
 
-	rec, body = restarted.do(call{method: http.MethodGet, path: apiBase + "/playback/history", bearer: own.token})
+	_, body = restarted.do(call{method: http.MethodGet, path: apiBase + "/playback/history", bearer: own.token})
 	items := body["items"].([]any)
 	if len(items) != 2 || items[0].(map[string]any)["position_ms"] != float64(95_000) ||
 		items[1].(map[string]any)["position_ms"] != float64(15_000) {

@@ -896,7 +896,8 @@ func TestLimiterSeRellenaYBarreEntradas(t *testing.T) {
 	l := NewLimiter(2)
 	l.now = func() time.Time { return now }
 
-	if !l.Allow("a") || !l.Allow("a") {
+	first, second := l.Allow("a"), l.Allow("a")
+	if !first || !second {
 		t.Fatal("debe admitir el cupo")
 	}
 	if l.Allow("a") {

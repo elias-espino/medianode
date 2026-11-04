@@ -876,9 +876,10 @@ paths:
       summary: Crear sesión de reproducción (§16.3)
       description: >-
         Autoriza, elige archivo y pistas, decide el modo y devuelve una URL opaca con
-        su token. Hasta la Fase 8 solo se sirve Direct Play: si hace falta remux,
-        transcodificación o FFmpeg para el subtítulo, responde 422
-        PLAYBACK_UNSUPPORTED con la decisión y sus motivos en details.
+        su token. Si el cliente no admite lo que hace falta (HLS, subtítulos que exigen FFmpeg,
+        HDR) responde 422 PLAYBACK_UNSUPPORTED con la decisión y sus motivos en details. Si
+        no hay cupo de transcodificación, 503 TRANSCODE_CAPACITY_EXCEEDED con Retry-After y
+        sin crear la sesión.
       requestBody:
         required: true
         content:
@@ -950,6 +951,105 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/master.m3u8:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Master HLS de una sesión remuxeada o transcodificada
+      description: >-
+        Una sola variante, que apunta a media.m3u8. Solo existe si el servidor tiene
+        FFmpeg y la sesión no es Direct Play; si no, 404.
+      security: []
+      responses:
+        "200":
+          description: Playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/media.m3u8:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+    get:
+      summary: Playlist de medios
+      description: >-
+        Sintética y VOD cuando se conoce la duración (recodificando) o el índice de
+        keyframes (copiando): se genera sin esperar a FFmpeg y permite saltar a cualquier
+        punto. Sin índice es una playlist EVENT con lo ya generado.
+      security: []
+      responses:
+        "200":
+          description: Playlist
+          content:
+            application/vnd.apple.mpegurl:
+              schema: { type: string }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+  /stream/session/{id}/{token}/{name}:
+    servers:
+      - url: /
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: token, in: path, required: true, schema: { type: string } }
+      - name: name
+        in: path
+        required: true
+        description: >-
+          init.mp4 o un segmento seg_NNNNN.m4s (vídeo recodificado) o seg_NNNNN.ts
+          (vídeo copiado), tal y como los lista la playlist. Cualquier otro nombre es 404.
+        schema: { type: string }
+    get:
+      summary: Inicialización o segmento HLS
+      description: >-
+        Si el segmento aún no existe, espera a FFmpeg hasta 20 s; si está lejos de lo
+        generado, reinicia FFmpeg en ese punto. Admite Range. Un segmento que no estuvo
+        a tiempo responde 503 TRANSCODE_INITIALIZATION_FAILED con Retry-After.
+      security: []
+      responses:
+        "200":
+          description: Segmento
+          content:
+            video/mp4:
+              schema: { type: string, format: binary }
+            video/mp2t:
+              schema: { type: string, format: binary }
+        "206": { description: Rango del segmento }
+        "404": { $ref: "#/components/responses/Error" }
+        "410": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /admin/transcodes:
+    get:
+      summary: Trabajos de FFmpeg activos y cupos
+      description: Solo administradores.
+      responses:
+        "200":
+          description: Trabajos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Transcodes" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/transcodes/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/Id" }
+    post:
+      summary: Cancelar un trabajo
+      description: >-
+        Solo administradores. Cierra la sesión del trabajo: para FFmpeg, borra su
+        directorio y libera el cupo. Cancelar solo el proceso lo reiniciaría con la
+        siguiente petición de segmento.
+      responses:
+        "204": { description: Trabajo cancelado }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -1211,6 +1311,7 @@ components:
         search: { type: boolean }
         direct_play: { type: boolean }
         transcoding: { type: boolean }
+        video_encoder: { type: string, nullable: true, description: Codificador efectivo, p. ej. libx264. }
         hls: { type: boolean }
         events: { type: boolean }
     ServerStatus:
@@ -1492,6 +1593,34 @@ components:
         max_resolution: { type: string, example: 1920x1080 }
         max_bit_depth: { type: integer, minimum: 8, maximum: 16 }
         max_audio_channels: { type: integer, minimum: 1, maximum: 16 }
+    Capacity:
+      type: object
+      required: [used, limit]
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+    TranscodeJob:
+      type: object
+      required: [id, session_id, kind, start_segment, segment, position_ms, started_at]
+      properties:
+        id: { type: string }
+        session_id: { type: string }
+        kind: { type: string, enum: [heavy, light], description: heavy recodifica el vídeo; light lo copia. }
+        encoder: { type: string, nullable: true }
+        start_segment: { type: integer }
+        segment: { type: integer, description: Último segmento terminado. }
+        position_ms: { type: integer }
+        started_at: { type: string, format: date-time }
+    Transcodes:
+      type: object
+      required: [jobs, capacity]
+      properties:
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/TranscodeJob" }
+        capacity:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/Capacity" }
     CreateSessionRequest:
       type: object
       required: [media_item_id]

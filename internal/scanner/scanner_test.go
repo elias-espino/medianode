@@ -669,7 +669,9 @@ func TestSymlinkFueraDeLaRaizSeIgnora(t *testing.T) {
 	inside := write(t, root, "A (2001).mkv", 100)
 	symlinkOrSkip(t, secret, filepath.Join(root, "Enlace (2002).mkv"))
 	symlinkOrSkip(t, outside, filepath.Join(root, "carpeta"))
-	symlinkOrSkip(t, inside, filepath.Join(root, "Interno (2003).mkv"))
+	// Relativo: os.Root rechaza los enlaces con ruta absoluta, aunque apunten
+	// dentro de la raíz.
+	symlinkOrSkip(t, filepath.Base(inside), filepath.Join(root, "Interno (2003).mkv"))
 	lib, paths := f.library(media.LibraryMovies, root)
 	f.scan(lib)
 	if f.count("SELECT COUNT(*) FROM media_files") != 2 {

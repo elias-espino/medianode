@@ -35,6 +35,7 @@ import (
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
 	"medianode/internal/testutil"
+	"medianode/internal/transcoding"
 	"medianode/internal/users"
 )
 
@@ -55,7 +56,7 @@ type env struct {
 	t        *testing.T
 	h        http.Handler
 	code     string
-	logs     *bytes.Buffer
+	logs     *syncBuffer
 	db       *database.DB
 	imgDir   string
 	sessions *sessions.Manager
@@ -63,6 +64,9 @@ type env struct {
 	auth     *auth.Service
 	devices  *devices.Service
 	playback *playback.Service
+
+	transcoder *transcoding.Manager
+	indexer    *transcoding.Indexer
 }
 
 func newEnv(t *testing.T) *env {
@@ -72,10 +76,14 @@ func newEnv(t *testing.T) *env {
 
 // newEnvOn monta el servidor sobre una base existente: sirve para simular un
 // reinicio tras una caída.
-func newEnvOn(t *testing.T, db *database.DB) *env {
+func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 	t.Helper()
+	var eo envOptions
+	for _, o := range opts {
+		o(&eo)
+	}
 	hasher := auth.NewHasher(auth.Params{MemoryKiB: 8, Iterations: 1, Threads: 1})
-	logs := &bytes.Buffer{}
+	logs := &syncBuffer{}
 	log := zerolog.New(logs)
 	a := auth.New(db, hasher, log)
 	code, err := a.Bootstrap(context.Background())
@@ -102,14 +110,41 @@ func newEnvOn(t *testing.T, db *database.DB) *env {
 	ds.Sessions, ds.Bus = sm, bus
 	ps := playback.NewService(db, authz, sm, log)
 	sm.AddListener(ps)
-	return &env{t: t, code: code, logs: logs, db: db, imgDir: imgDir, sessions: sm, bus: bus, auth: a, devices: ds, playback: ps, h: NewRouter(Deps{
-		Log: log, Name: "Prueba", Version: "1.2.3",
-		Auth: a, Users: us, Devices: ds, Libraries: libs,
-		Catalog: readmodel.New(db, authz), Metadata: metadata.NewService(db, authz, enricher),
-		Enricher: enricher, Images: imgs, Started: time.Now(),
-		Sessions: sm, Progress: sessions.NewProgress(db, authz, bus, 0.9), Bus: bus, Authorizer: authz,
-		Playback: ps, DB: db,
-	})}
+	var tm *transcoding.Manager
+	var indexer *transcoding.Indexer
+	if eo.ffmpeg != "" {
+		tm = transcoding.NewManager(transcoding.Options{
+			FFmpeg: eo.ffmpeg, Dir: t.TempDir(), SegmentSeconds: 6, RestartSegments: 5, WaitTimeout: 30 * time.Second,
+		}, db, bus, transcoding.NewAdmission(eo.heavy, eo.light), log)
+		if err := tm.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = tm.Stop(context.Background()) })
+		ps.Transcoder = tm
+		sm.AddListener(sessions.ListenerFunc(func(s sessions.Session) { tm.OnSessionEnded(s.ID) }))
+		indexer = transcoding.NewIndexer(t.TempDir(), eo.ffprobe, log)
+		if err := indexer.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = indexer.Stop(context.Background()) })
+		ps.Indexer = indexer
+	}
+	return &env{t: t, code: code, logs: logs, db: db, imgDir: imgDir, sessions: sm, bus: bus, auth: a, devices: ds, playback: ps,
+		transcoder: tm, indexer: indexer, h: NewRouter(Deps{
+			Log: log, Name: "Prueba", Version: "1.2.3",
+			Auth: a, Users: us, Devices: ds, Libraries: libs,
+			Catalog: readmodel.New(db, authz), Metadata: metadata.NewService(db, authz, enricher),
+			Enricher: enricher, Images: imgs, Started: time.Now(),
+			Sessions: sm, Progress: sessions.NewProgress(db, authz, bus, 0.9), Bus: bus, Authorizer: authz,
+			Playback: ps, DB: db, Transcoder: tm,
+		})}
+}
+
+// envOptions activa FFmpeg en el entorno. Sin él, el servidor solo hace
+// Direct Play, como uno arrancado sin FFmpeg.
+type envOptions struct {
+	ffmpeg, ffprobe string
+	heavy, light    int
 }
 
 type call struct {
@@ -655,7 +690,7 @@ func TestBibliotecasPorAPI(t *testing.T) {
 	}})
 	e.want(rec, http.StatusCreated)
 	permsPath := apiBase + "/admin/users/" + user["id"].(string) + "/permissions"
-	rec, body = e.do(call{method: http.MethodPut, path: permsPath, bearer: token, body: map[string]any{
+	rec, _ = e.do(call{method: http.MethodPut, path: permsPath, bearer: token, body: map[string]any{
 		"libraries": []map[string]any{{"library_id": lib["id"], "permissions": []string{"view"}}},
 	}})
 	e.want(rec, http.StatusOK)

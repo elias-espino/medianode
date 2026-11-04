@@ -42,6 +42,8 @@ type Indexer struct {
 	mu      sync.Mutex
 	pending map[string]bool
 	queue   chan indexJob
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 }
 
 type indexJob struct {
@@ -88,6 +90,26 @@ func (x *Indexer) Request(fileID, path string, size int64, modifiedAt string) {
 	}
 }
 
+// Name implementa lifecycle.Component.
+func (x *Indexer) Name() string { return "keyframes" }
+
+// Start lanza el trabajador en segundo plano.
+func (x *Indexer) Start(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	x.cancel = cancel
+	x.wg.Go(func() { x.Run(runCtx) })
+	return nil
+}
+
+// Stop cancela el cálculo en curso: ffprobe se mata con su contexto.
+func (x *Indexer) Stop(context.Context) error {
+	if x.cancel != nil {
+		x.cancel()
+	}
+	x.wg.Wait()
+	return nil
+}
+
 // Run atiende la cola hasta que se cancela ctx.
 func (x *Indexer) Run(ctx context.Context) {
 	for {
@@ -120,7 +142,7 @@ func (x *Indexer) build(ctx context.Context, j indexJob) {
 		return
 	}
 	tmp := x.file(j.fileID) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o640); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		x.log.Error().Err(err).Msg("no se pudo guardar el índice")
 		return
 	}

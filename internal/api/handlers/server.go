@@ -12,9 +12,11 @@ import (
 	"medianode/internal/api/dto"
 	"medianode/internal/authorization"
 	"medianode/internal/database"
+	"medianode/internal/ffmpeg"
 	"medianode/internal/media"
 	"medianode/internal/metadata"
 	"medianode/internal/readmodel"
+	"medianode/internal/transcoding"
 )
 
 // ProtocolVersion es la versión del contrato /api/v1.
@@ -30,6 +32,8 @@ type Server struct {
 	FFprobeAvailable bool
 	Catalog          *readmodel.Catalog
 	Enricher         *metadata.Enricher
+	Transcoder       *transcoding.Manager
+	FFmpeg           *ffmpeg.Capabilities
 }
 
 // Health responde a la supervisión. No requiere autenticación.
@@ -102,6 +106,11 @@ func (s *Server) Capabilities(w http.ResponseWriter, _ *http.Request) {
 			string(media.ImageThumbnail), string(media.ImageLogo)},
 		Search:     true,
 		DirectPlay: true,
+	}
+	if s.Transcoder != nil {
+		out.Transcoding, out.HLS = true, true
+		enc := string(s.Transcoder.Encoder())
+		out.VideoEncoder = &enc
 	}
 	if p := s.Enricher.Status().Provider; p != "" {
 		out.MetadataProvider = &p

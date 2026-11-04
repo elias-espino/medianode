@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"medianode/internal/sessions"
 	"medianode/internal/storage"
 	"medianode/internal/subtitles"
+	"medianode/internal/transcoding"
 )
 
 // touchEvery limita las llamadas a Touch mientras se lee el archivo.
@@ -42,7 +45,113 @@ type Stream struct {
 	DB       *database.DB
 	Sessions *sessions.Manager
 	Playback *playback.Service
-	Log      zerolog.Logger
+	// Transcoder es nil sin FFmpeg: solo hay Direct Play.
+	Transcoder *transcoding.Manager
+	Log        zerolog.Logger
+}
+
+const playlistType = "application/vnd.apple.mpegurl"
+
+// hlsSession verifica la sesión y que tenga trabajo de FFmpeg. Una sesión de
+// Direct Play no tiene playlists: 404.
+func (h *Stream) hlsSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
+	s := h.session(w, r)
+	if s == nil {
+		return nil
+	}
+	if h.Transcoder == nil {
+		api.WriteError(w, r, core.ErrNotFound())
+		return nil
+	}
+	return s
+}
+
+// Master entrega el master.m3u8, que apunta a la playlist de medios.
+func (h *Stream) Master(w http.ResponseWriter, r *http.Request) {
+	s := h.hlsSession(w, r)
+	if s == nil {
+		return
+	}
+	data, err := h.Transcoder.Master(s.ID)
+	h.writePlaylist(w, r, data, err)
+}
+
+// Media entrega la playlist de medios: la sintética VOD, que permite saltar
+// a cualquier punto sin esperar a FFmpeg, o la EVENT si no hay índice.
+func (h *Stream) Media(w http.ResponseWriter, r *http.Request) {
+	s := h.hlsSession(w, r)
+	if s == nil {
+		return
+	}
+	data, err := h.Transcoder.Media(s.ID)
+	h.writePlaylist(w, r, data, err)
+}
+
+func (h *Stream) writePlaylist(w http.ResponseWriter, r *http.Request, data []byte, err error) {
+	if err != nil {
+		h.failHLS(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", playlistType)
+	// Una playlist EVENT crece: ningún proxy debe guardarla.
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(data)
+}
+
+// Media entrega init.mp4 y los segmentos. El nombre se valida contra la
+// lista de lo que el gestor produce; nada más llega al disco. Si el segmento
+// aún no existe, espera a FFmpeg o lo reinicia en ese punto.
+func (h *Stream) Segment(w http.ResponseWriter, r *http.Request) {
+	s := h.hlsSession(w, r)
+	if s == nil {
+		return
+	}
+	name := chi.URLParam(r, "name")
+	path, err := h.Transcoder.File(r.Context(), s.ID, name)
+	if err != nil {
+		h.failHLS(w, r, err)
+		return
+	}
+	// La ruta la construye transcoding.File, y solo a partir de init.mp4 o de un
+	// segmento que cumple reSegment dentro del directorio de la sesión.
+	f, err := os.Open(path) //nolint:gosec // ruta validada por transcoding.File
+	if err != nil {
+		// Un segmento borrado por la cuota entre la espera y la apertura.
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	switch {
+	case strings.HasSuffix(name, ".ts"):
+		w.Header().Set("Content-Type", "video/mp2t")
+	default:
+		w.Header().Set("Content-Type", "video/mp4")
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, "", info.ModTime(), f)
+}
+
+// failHLS traduce los errores del gestor. Un segmento que no estuvo a tiempo
+// responde 503 con Retry-After, no 500: el cliente puede reintentar.
+func (h *Stream) failHLS(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, transcoding.ErrNoStream), errors.Is(err, transcoding.ErrBadName):
+		api.WriteError(w, r, core.ErrNotFound())
+	case errors.Is(err, transcoding.ErrSegmentTimeout), errors.Is(err, context.DeadlineExceeded):
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+	case errors.Is(err, context.Canceled):
+		// El cliente se fue: no hay a quién responder.
+	default:
+		h.Log.Error().Err(err).Str("session_id", chi.URLParam(r, "id")).Msg("error sirviendo HLS")
+		api.WriteError(w, r, core.ErrTranscodeFailed())
+	}
 }
 
 // session verifica el token y que el dueño siga autorizado.
@@ -64,6 +173,12 @@ func (h *Stream) session(w http.ResponseWriter, r *http.Request) *sessions.Sessi
 func (h *Stream) File(w http.ResponseWriter, r *http.Request) {
 	s := h.session(w, r)
 	if s == nil {
+		return
+	}
+	// Una sesión que debía remuxearse o transcodificarse no puede pedir el
+	// original: se saltaría el límite de bitrate o de resolución.
+	if s.Mode != string(playback.DirectPlay) {
+		api.WriteError(w, r, core.ErrNotFound())
 		return
 	}
 	loc, err := h.DB.R.GetFileLocation(r.Context(), s.FileID)
@@ -121,7 +236,7 @@ func (h *Stream) Subtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	format := protocol.CodecName(deref(sub.Format))
-	if ext != format && !(ext == "vtt" && format == "srt") {
+	if ext != format && (ext != "vtt" || format != "srt") {
 		api.WriteError(w, r, core.ErrNotFound())
 		return
 	}

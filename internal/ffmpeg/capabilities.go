@@ -23,7 +23,7 @@ type Capabilities struct {
 func Probe(ctx context.Context, path string) (*Capabilities, error) {
 	out, err := exec.CommandContext(ctx, path, "-hide_banner", "-version").Output()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	c := &Capabilities{Encoders: map[Encoder]bool{}}
 	if line, _, _ := strings.Cut(string(out), "\n"); strings.HasPrefix(line, "ffmpeg version ") {
@@ -79,7 +79,7 @@ func TestEncoder(ctx context.Context, path string, e Encoder) error {
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %v: %s", e, err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("%s: %w: %s", e, err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

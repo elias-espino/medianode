@@ -30,7 +30,7 @@ func Locate() (string, error) {
 	}
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return "", fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return path, nil
 }

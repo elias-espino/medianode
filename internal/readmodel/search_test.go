@@ -188,7 +188,7 @@ func TestBorrarBibliotecaGrande(t *testing.T) {
 	}
 	start := time.Now()
 	f.exec("DELETE FROM libraries WHERE id = ?", lib)
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > deleteBudget {
 		t.Fatalf("borrar 10 000 elementos tardó %s", d)
 	} else {
 		t.Logf("borrar 10 000 elementos: %s", d)

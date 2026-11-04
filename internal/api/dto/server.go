@@ -49,6 +49,7 @@ type ServerCapabilities struct {
 	Search           bool     `json:"search"`
 	DirectPlay       bool     `json:"direct_play"`
 	Transcoding      bool     `json:"transcoding"`
+	VideoEncoder     *string  `json:"video_encoder"`
 	HLS              bool     `json:"hls"`
 	Events           bool     `json:"events"`
 }
@@ -57,4 +58,28 @@ type ServerCapabilities struct {
 type ServerVersion struct {
 	Version         string `json:"version"`
 	ProtocolVersion int    `json:"protocol_version"`
+}
+
+// TranscodeJob es un trabajo de FFmpeg activo.
+type TranscodeJob struct {
+	ID           string  `json:"id"`
+	SessionID    string  `json:"session_id"`
+	Kind         string  `json:"kind"` // heavy recodifica el vídeo; light copia o recodifica solo el audio.
+	Encoder      *string `json:"encoder"`
+	StartSegment int     `json:"start_segment"`
+	Segment      int     `json:"segment"`
+	PositionMS   int64   `json:"position_ms"`
+	StartedAt    string  `json:"started_at"`
+}
+
+// Capacity es el uso de una clase de cupo.
+type Capacity struct {
+	Used  int `json:"used"`
+	Limit int `json:"limit"`
+}
+
+// Transcodes son los trabajos activos y los cupos.
+type Transcodes struct {
+	Jobs     []TranscodeJob      `json:"jobs"`
+	Capacity map[string]Capacity `json:"capacity"`
 }

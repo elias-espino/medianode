@@ -23,6 +23,7 @@ import (
 	"medianode/internal/database"
 	"medianode/internal/devices"
 	"medianode/internal/events"
+	"medianode/internal/ffmpeg"
 	"medianode/internal/images"
 	"medianode/internal/libraries"
 	"medianode/internal/lifecycle"
@@ -35,6 +36,7 @@ import (
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
 	"medianode/internal/storage"
+	"medianode/internal/transcoding"
 	"medianode/internal/users"
 	"medianode/web"
 )
@@ -208,21 +210,56 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	playbackService := playback.NewService(db, authz, sessionManager, monitoring.Module(log, "playback"))
 	sessionManager.AddListener(playbackService)
 
+	// Sin FFmpeg el servidor arranca igual, solo con Direct Play.
+	var transcoder *transcoding.Manager
+	var ffcaps *ffmpeg.Capabilities
+	if ffmpegPath, err := ffmpeg.Locate(); err != nil {
+		log.Warn().Err(err).Msg("FFmpeg no encontrado: solo habrá Direct Play")
+	} else {
+		probeCtx, cancel := context.WithTimeout(ctx, time.Minute)
+		ffcaps, err = ffmpeg.Probe(probeCtx, ffmpegPath)
+		cancel()
+		if err != nil {
+			log.Warn().Err(err).Msg("no se pudo analizar FFmpeg: solo habrá Direct Play")
+		} else if !ffcaps.Encoders[ffmpeg.X264] {
+			log.Warn().Str("version", ffcaps.Version).Msg("este FFmpeg no incluye libx264: solo habrá Direct Play")
+		} else {
+			encoder := ffcaps.Choose(cfg.Transcoding.HardwareAcceleration)
+			log.Info().Str("version", ffcaps.Version).Str("codificador", string(encoder)).
+				Interface("disponibles", ffcaps.Working).Msg("FFmpeg listo")
+			transcoder = transcoding.NewManager(transcoding.Options{
+				FFmpeg: ffmpegPath, Dir: cfg.Paths.Transcodes, SegmentSeconds: cfg.Transcoding.SegmentSeconds,
+				RestartSegments: cfg.Transcoding.SeekRestartSegments, MaxDiskBytes: int64(cfg.Transcoding.MaxDiskGB) << 30,
+				Encoder: encoder,
+			}, db, bus, transcoding.NewAdmission(cfg.Transcoding.MaxConcurrentJobs, cfg.Transcoding.MaxConcurrentLightJobs),
+				monitoring.Module(log, "transcoding"))
+			playbackService.Transcoder = transcoder
+			sessionManager.AddListener(sessions.ListenerFunc(func(s sessions.Session) { transcoder.OnSessionEnded(s.ID) }))
+			manager.Register(transcoder)
+			if ffprobe != "" {
+				indexer := transcoding.NewIndexer(filepath.Join(cfg.Paths.Cache, "keyframes"), ffprobe, monitoring.Module(log, "keyframes"))
+				playbackService.Indexer = indexer
+				manager.Register(indexer)
+			}
+		}
+	}
+
 	router := routes.NewRouter(routes.Deps{
-		Log:       monitoring.Module(log, "http"),
-		Name:      cfg.Server.Name,
-		Version:   version,
-		Auth:      authService,
-		Users:     usersService,
-		Devices:   devicesService,
-		Libraries: librariesService,
-		Catalog:   readmodel.New(db, authz),
-		Metadata:  metadata.NewService(db, authz, enricher),
-		Enricher:  enricher,
-		Images:    imageManager,
-		Sessions:  sessionManager,
-		Playback:  playbackService,
-		DB:        db,
+		Log:        monitoring.Module(log, "http"),
+		Name:       cfg.Server.Name,
+		Version:    version,
+		Auth:       authService,
+		Users:      usersService,
+		Devices:    devicesService,
+		Libraries:  librariesService,
+		Catalog:    readmodel.New(db, authz),
+		Metadata:   metadata.NewService(db, authz, enricher),
+		Enricher:   enricher,
+		Images:     imageManager,
+		Sessions:   sessionManager,
+		Playback:   playbackService,
+		Transcoder: transcoder,
+		DB:         db,
 		Progress: sessions.NewProgress(db, authz, bus,
 			float64(cfg.Sessions.CompletedThresholdPercent)/100),
 		Bus:            bus,

@@ -6,16 +6,70 @@ linters:
     - bodyclose
     - errorlint
     - gosec
-    - misspell
     - nilerr
     - noctx
     - rowserrcheck
     - sqlclosecheck
     - unconvert
+  # misspell no está: solo corrige inglés y el código y sus comentarios están
+  # en español, así que marcaría palabras correctas como «directorios».
+
+  settings:
+    errcheck:
+      # Cerrar o escribir a la consola no tiene remedio útil si falla.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (net.Listener).Close
+        - (*net/http.Response).Body.Close
+        - (*github.com/coder/websocket.Conn).Close
+        - (*github.com/coder/websocket.Conn).CloseNow
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Fprint
+        - (*os.Root).Close
+        - (*github.com/fsnotify/fsnotify.Watcher).Close
+        - golang.org/x/sys/windows.CloseHandle
+        - os.Remove
+    gosec:
+      excludes:
+        # G101 marca nombres como «auth.jwt_secret» o códigos de error; no
+        # hay credenciales en el código.
+        - G101
+        # G103: la API de Windows para el Job Object exige unsafe.Pointer.
+        - G103
+        # G104 repite errcheck, que ya tiene sus excepciones.
+        - G104
+        # G115: las conversiones son de longitudes y de pid, siempre pequeñas.
+        - G115
+        # G124: las cookies se crean con Secure según la conexión y HttpOnly
+        # según su función (§15.4); el análisis no ve esa lógica.
+        - G124
+        # G204 y G304: las rutas pasan por storage.OpenMedia y ffmpeg.safeName
+        # y los comandos son listas de argumentos, sin shell.
+        - G204
+        - G304
 
   exclusions:
     paths:
       - internal/database/sqlc
+    rules:
+      # Las pruebas lanzan procesos, abren archivos y hacen peticiones con
+      # valores que ellas mismas construyen.
+      - path: _test\.go
+        linters:
+          - gosec
+          - noctx
+          - errcheck
+          - bodyclose
+          - errorlint
+          - unconvert
+      - path: ^scripts/
+        linters:
+          - gosec
+          - noctx
 
 formatters:
   enable:

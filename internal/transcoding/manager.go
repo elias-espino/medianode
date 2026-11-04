@@ -113,6 +113,7 @@ type stream struct {
 	segs      []Segment // nil en modo EVENT.
 	job       *job
 	gen       int
+	genStart  map[int]int // Primer segmento de cada trabajo, por generación.
 	completed map[int]bool
 	lastAsked int
 }
@@ -149,6 +150,9 @@ func NewManager(opts Options, db *database.DB, bus *events.Bus, adm *Admission, 
 	}
 	return &Manager{opts: opts, db: db, bus: bus, log: log, admission: adm, streams: map[string]*stream{}, encoder: opts.Encoder}
 }
+
+// Dir es el directorio de trabajo: un subdirectorio por sesión.
+func (m *Manager) Dir() string { return m.opts.Dir }
 
 // Admission devuelve el control de cupos.
 func (m *Manager) Admission() *Admission { return m.admission }
@@ -198,7 +202,7 @@ func (m *Manager) Stop(context.Context) error {
 // Prepare registra la sesión y arranca su primer trabajo en el segmento que
 // contiene la posición inicial. El cupo ya debe estar reservado.
 func (m *Manager) Prepare(ctx context.Context, p Plan) error {
-	st := &stream{plan: p, dir: filepath.Join(m.opts.Dir, p.SessionID), completed: map[int]bool{}}
+	st := &stream{plan: p, dir: filepath.Join(m.opts.Dir, p.SessionID), completed: map[int]bool{}, genStart: map[int]int{}}
 	switch {
 	case p.Kind == Heavy:
 		st.ext = "m4s"
@@ -412,9 +416,12 @@ func (m *Manager) waitInit(ctx context.Context, st *stream) (string, error) {
 		}
 		// La playlist declara un solo init: vale el del trabajo más reciente,
 		// que tiene los mismos parámetros de códec (ADR 0003).
+		// FFmpeg crea el archivo al empezar y lo rellena al cerrar el primer
+		// segmento: servirlo antes entregaría un init vacío. Solo vale el de
+		// un trabajo que ya terminó un segmento y cuyo init tiene contenido.
 		for gen := st.gen; gen >= 0; gen-- {
 			p := filepath.Join(st.dir, initName(gen))
-			if _, err := os.Stat(p); err == nil {
+			if info, err := os.Stat(p); err == nil && info.Size() > 0 && m.isComplete(st, st.genStart[gen]) {
 				st.mu.Unlock()
 				return p, nil
 			}
@@ -540,6 +547,7 @@ func (m *Manager) startJob(st *stream, n int) error {
 		m.log.Warn().Err(err).Msg("no se pudo vincular FFmpeg al servidor")
 	}
 	st.job = j
+	st.genStart[st.gen] = n
 	startMS := int64(0)
 	if st.segs != nil {
 		startMS = st.segs[n].StartUS / 1000

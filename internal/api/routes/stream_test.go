@@ -22,6 +22,7 @@ type movieFixture struct {
 	pathID  string
 	item    string
 	content []byte
+	size    int64 // Tamaño del último vídeo real añadido con realFile.
 }
 
 func (e *env) movie(token string) *movieFixture {

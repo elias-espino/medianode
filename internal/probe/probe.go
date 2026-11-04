@@ -89,7 +89,7 @@ func Locate() (string, error) {
 	}
 	path, err := exec.LookPath("ffprobe")
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return "", fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return path, nil
 }
@@ -121,13 +121,13 @@ func (r *Runner) Run(ctx context.Context, path string) (*Result, error) {
 	case errors.As(err, &exitErr):
 		return nil, fmt.Errorf("%w: %s", ErrInvalidMedia, strings.TrimSpace(stderr.String()))
 	case err != nil:
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	case stdout.overflow:
 		return nil, fmt.Errorf("%w: salida demasiado grande", ErrInvalidMedia)
 	}
 	res, err := Parse(stdout.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidMedia, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidMedia, err)
 	}
 	return res, nil
 }
