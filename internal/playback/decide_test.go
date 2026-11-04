@@ -121,6 +121,16 @@ func TestDecide(t *testing.T) {
 			want{Transcode, "http", Recode, Copy, SubNone, ReasonVideoCodec}},
 		{"h264 de 10 bits en web", Input{Container: "mp4", Video: &Video{Codec: "h264", BitDepth: i64(10)}, Audio: aac(), Client: web},
 			want{Transcode, "http", Recode, Copy, SubNone, ReasonBitDepth}},
+		// El HDR no debe quedar oculto por otro motivo: sin el aviso, se recodificaría
+		// sin tone mapping y el color saldría lavado.
+		{"hevc hdr10 en web: ni códec ni HDR", Input{Container: "mp4", Video: hevc10, Audio: aac(), Client: web},
+			want{Transcode, "http", Recode, Copy, SubNone, ReasonVideoCodec + "," + ReasonHDR}},
+		{"h264 hlg de 10 bits en web: ni profundidad ni HDR", Input{Container: "mp4", Video: &Video{Codec: "h264", BitDepth: i64(10), HDR: str("hlg")}, Audio: aac(), Client: web},
+			want{Transcode, "http", Recode, Copy, SubNone, ReasonBitDepth + "," + ReasonHDR}},
+		{"hevc hdr10 de 4K en android sin HDR: solo el HDR", Input{Container: "mkv", Video: hevc10, Audio: aac(), Client: android},
+			want{Transcode, "hls", Recode, Copy, SubNone, ReasonHDR}},
+		{"sdr de 10 bits en web: sin HDR que convertir", Input{Container: "mp4", Video: &Video{Codec: "h264", BitDepth: i64(10)}, Audio: aac(), Client: web},
+			want{Transcode, "http", Recode, Copy, SubNone, ReasonBitDepth}},
 		{"hdr10 en tizen sí", Input{Container: "mkv", Video: hevc10, Audio: aac(), Client: tizen},
 			want{DirectPlay, "http", Copy, Copy, SubNone, ""}},
 		{"hdr10 en android sin hdr", Input{Container: "mkv", Video: hevc10, Audio: aac(), Client: android},

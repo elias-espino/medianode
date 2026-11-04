@@ -87,7 +87,9 @@ export function App() {
     case "login":
       return <Login serverName={server?.name ?? "MediaNode"} onDone={(user) => setPhase({ kind: "ready", user })} />;
     case "ready": {
-      const isAdmin = phase.user.role === "owner" || phase.user.role === "admin";
+      // Desde fuera de la red local la administración está cerrada (§14.2): no se
+      // muestran pantallas que el servidor rechazaría.
+      const isAdmin = (phase.user.role === "owner" || phase.user.role === "admin") && (server?.admin_available ?? true);
       return (
         <SessionContext.Provider value={{ user: phase.user, server: server!, isAdmin, logout }}>
           <Shell />

@@ -36,6 +36,7 @@ const (
 // Options ajusta los tiempos del gestor.
 type Options struct {
 	IdleTimeout        time.Duration // heartbeat_timeout_seconds
+	DLNAIdleTimeout    time.Duration // dlna.idle_timeout_seconds: un renderer no envía heartbeats (§13.2).
 	FlushInterval      time.Duration // progress_persist_interval_seconds
 	CompletedThreshold float64       // Fracción de la duración, 0,9 por defecto.
 	SweepInterval      time.Duration // Revisión de inactividad; por defecto un tercio de IdleTimeout, como mucho 10 s.
@@ -46,6 +47,9 @@ func (o *Options) defaults() {
 	if o.IdleTimeout <= 0 {
 		o.IdleTimeout = 90 * time.Second
 	}
+	if o.DLNAIdleTimeout <= 0 {
+		o.DLNAIdleTimeout = 120 * time.Second
+	}
 	if o.FlushInterval <= 0 {
 		o.FlushInterval = 30 * time.Second
 	}
@@ -53,7 +57,7 @@ func (o *Options) defaults() {
 		o.CompletedThreshold = 0.9
 	}
 	if o.SweepInterval <= 0 {
-		o.SweepInterval = min(o.IdleTimeout/3, 10*time.Second)
+		o.SweepInterval = min(min(o.IdleTimeout, o.DLNAIdleTimeout)/3, 10*time.Second)
 	}
 }
 
@@ -491,6 +495,25 @@ func (m *Manager) Touch(id string) {
 	}
 }
 
+// Activate pasa a playing una sesión que acaba de recibir su primer dato. Las de
+// DLNA no envían heartbeats: es lo único que las saca de initializing.
+func (m *Manager) Activate(ctx context.Context, id string) error {
+	m.mu.Lock()
+	s, ok := m.active[id]
+	if !ok || s.Status != Initializing {
+		m.mu.Unlock()
+		return nil
+	}
+	s.Status, s.LastActivity = Playing, m.now()
+	snap := *s
+	m.mu.Unlock()
+	if err := m.db.Q.SetSessionStatus(ctx, sqlc.SetSessionStatusParams{ID: id, Status: string(Playing)}); err != nil {
+		return fmt.Errorf("guardar estado: %w", err)
+	}
+	m.publish(events.SessionUpdated, &snap)
+	return nil
+}
+
 // StopSession cierra una sesión del actor: completed si se superó el umbral,
 // stopped si no. Cerrar una sesión ya terminada no hace nada.
 func (m *Manager) StopSession(ctx context.Context, actor authorization.Actor, id string) error {
@@ -672,11 +695,15 @@ func (m *Manager) flushOne(ctx context.Context, id string) {
 
 // sweep expira las sesiones sin actividad durante IdleTimeout.
 func (m *Manager) sweep(ctx context.Context) {
-	limit := m.now().Add(-m.opts.IdleTimeout)
+	now := m.now()
 	m.mu.Lock()
 	var idle []string
 	for id, s := range m.active {
-		if s.LastActivity.Before(limit) {
+		timeout := m.opts.IdleTimeout
+		if s.ClientKind == KindDLNA {
+			timeout = m.opts.DLNAIdleTimeout
+		}
+		if s.LastActivity.Before(now.Add(-timeout)) {
 			idle = append(idle, id)
 		}
 	}
@@ -820,4 +847,12 @@ func boolInt(b bool) int64 {
 		return 1
 	}
 	return 0
+}
+
+// Alive indica si la sesión sigue activa en memoria.
+func (m *Manager) Alive(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.active[id]
+	return ok
 }

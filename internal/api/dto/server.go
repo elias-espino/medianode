@@ -12,6 +12,7 @@ type ServerInfo struct {
 	Version         string `json:"version"`
 	ProtocolVersion int    `json:"protocol_version"`
 	SetupRequired   bool   `json:"setup_required"`
+	AdminAvailable  bool   `json:"admin_available"`
 }
 
 // ServerStatus es el estado del servidor. Los contadores y la cola de

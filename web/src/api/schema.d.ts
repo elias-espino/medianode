@@ -2858,6 +2858,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/remote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Comprobaciones de conectividad del acceso remoto
+         * @description Certificado, DNS, conexión a la dirección pública y estado de la prueba desde fuera de la red local. Con el acceso remoto desactivado no sale a la red. Solo administradores, y solo desde la red local salvo que remote.admin_enabled lo permita.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Informe */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteReport"];
+                    };
+                };
+                401: components["responses"]["Error"];
+                403: components["responses"]["Error"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/remote/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Iniciar la prueba de alcance desde fuera de la red local
+         * @description Genera un código de un solo uso (10 minutos) y devuelve la URL que hay que abrir desde otra red, por ejemplo con datos móviles. Sustituye a la prueba anterior.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Prueba pendiente */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RemoteProbe"];
+                    };
+                };
+                400: components["responses"]["Error"];
+                401: components["responses"]["Error"];
+                403: components["responses"]["Error"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/remote/probe/{nonce}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Abrir la prueba de alcance
+         * @description La abre quien está fuera de la red local, sin sesión. Con el código vigente responde 200 en texto plano; con cualquier otro, 404. Si la petición llega desde la red local no prueba nada y el código sigue valiendo.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    nonce: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Texto plano con el resultado */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                404: components["responses"]["Error"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/storage": {
         parameters: {
             query?: never;
@@ -3138,6 +3261,8 @@ export interface components {
             version: string;
             protocol_version: number;
             setup_required: boolean;
+            /** @description La administración es accesible para esta petición (no */
+            admin_available: boolean;
         };
         ServerVersion: {
             version: string;
@@ -3707,6 +3832,39 @@ export interface components {
             addresses: string[];
             connections_local: number;
             connections_remote: number;
+            tls_enabled: boolean;
+            remote_enabled: boolean;
+            remote_admin_enabled: boolean;
+            public_url: string;
+            local_networks: string[];
+            dlna_enabled: boolean;
+        };
+        RemoteCheck: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            status: "ok" | "warn" | "fail" | "skipped";
+            detail: string;
+        };
+        RemoteProbe: {
+            /** @enum {string} */
+            state: "none" | "pending" | "reachable" | "local_only" | "expired";
+            /** @description URL que se abre desde fuera de la red local. */
+            url?: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** @description Dirección desde la que llegó la petición de fuera. */
+            from?: string;
+            /** Format: date-time */
+            at?: string;
+        };
+        RemoteReport: {
+            enabled: boolean;
+            direct_enabled: boolean;
+            admin_enabled: boolean;
+            public_url: string;
+            checks: components["schemas"]["RemoteCheck"][];
+            probe: components["schemas"]["RemoteProbe"];
         };
         AdminStorage: {
             folders: {

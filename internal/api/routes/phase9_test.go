@@ -45,7 +45,8 @@ type streamRow struct {
 	typ, codec, lang string
 	w, h, depth      int
 	hdr              string
-	channels         int // Audio; 2 por defecto.
+	channels         int  // Audio; 2 por defecto.
+	forced           bool // Subtítulo forzado (solo lo usan las pruebas de DLNA).
 }
 
 // fixtureFile añade como versión del elemento un fixture de verdad (con sus

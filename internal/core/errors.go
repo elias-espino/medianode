@@ -9,13 +9,15 @@ import (
 // Códigos estables de §22.3 que ya produce el servidor. El resto entra con la
 // fase que los produce.
 const (
-	CodeInternal         = "INTERNAL_ERROR"
-	CodeNotFound         = "NOT_FOUND"
-	CodeMethodNotAllowed = "METHOD_NOT_ALLOWED"
-	CodeValidation       = "VALIDATION_ERROR"
-	CodeRateLimited      = "RATE_LIMITED"
-	CodeForbidden        = "FORBIDDEN"
-	CodeCSRFInvalid      = "CSRF_INVALID"
+	CodeInternal            = "INTERNAL_ERROR"
+	CodeNotFound            = "NOT_FOUND"
+	CodeMethodNotAllowed    = "METHOD_NOT_ALLOWED"
+	CodeValidation          = "VALIDATION_ERROR"
+	CodeRateLimited         = "RATE_LIMITED"
+	CodeForbidden           = "FORBIDDEN"
+	CodeCSRFInvalid         = "CSRF_INVALID"
+	CodeRemoteDisabled      = "REMOTE_ACCESS_DISABLED"
+	CodeRemoteAdminDisabled = "REMOTE_ADMIN_DISABLED"
 
 	CodeAuthRequired       = "AUTH_REQUIRED"
 	CodeAuthTokenExpired   = "AUTH_TOKEN_EXPIRED"
@@ -95,6 +97,16 @@ func ErrForbidden() *APIError {
 // ErrCSRFInvalid indica que falta o no coincide la cabecera CSRF.
 func ErrCSRFInvalid() *APIError {
 	return &APIError{Status: http.StatusForbidden, Code: CodeCSRFInvalid, Message: "Protección CSRF no superada"}
+}
+
+// ErrRemoteDisabled indica que el servidor no acepta peticiones de fuera de la red local.
+func ErrRemoteDisabled() *APIError {
+	return &APIError{Status: http.StatusForbidden, Code: CodeRemoteDisabled, Message: "Este servidor no acepta conexiones desde fuera de la red local"}
+}
+
+// ErrRemoteAdminDisabled indica que la administración solo se permite desde la red local.
+func ErrRemoteAdminDisabled() *APIError {
+	return &APIError{Status: http.StatusForbidden, Code: CodeRemoteAdminDisabled, Message: "La administración no está disponible desde fuera de la red local"}
 }
 
 // ErrAuthRequired indica que falta una credencial válida.

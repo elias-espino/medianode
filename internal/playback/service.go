@@ -42,6 +42,9 @@ type Request struct {
 	PreferredProtocol string // Se usará con HLS, en la Fase 8.
 	StartPositionMS   int64
 	ClientIP          string // Opcional: se guarda en la sesión.
+	// Remote indica que la petición llega de fuera de la red local: se aplica
+	// el límite de bitrate remoto del usuario (users.max_bitrate_remote).
+	Remote bool
 }
 
 // Response es lo que recibe el cliente (§9.5).
@@ -126,6 +129,7 @@ func (s *Service) CreateSession(ctx context.Context, actor authorization.Actor, 
 	if err != nil {
 		return nil, err
 	}
+	req.MaxBitrate = remoteLimit(req, prefs)
 
 	files, err := s.db.R.ListItemFiles(ctx, req.ItemID)
 	if err != nil {
@@ -293,6 +297,26 @@ func (s *Service) plan(ctx context.Context, sess *sessions.Session, o option, ki
 // tiene (FFmpeg, o un filtro de FFmpeg), o vacío. La entrega progresiva por
 // HTTP sin HLS no está prevista.
 func (s *Service) unsupported(o option) string {
+	if reason := s.unsupportedSubtitle(o); reason != "" {
+		return reason
+	}
+	d := o.decision
+	switch {
+	case d.Mode == DirectPlay:
+		return ""
+	case s.Transcoder == nil:
+		return "FFmpeg no está disponible en el servidor"
+	case d.Protocol != protocol.ProtocolHLS:
+		return "Este archivo necesita remux o transcodificación, y el cliente no admite HLS"
+	case needsToneMap(d) && !s.Features.ToneMapping:
+		return "El vídeo es HDR y el cliente no, y este servidor no puede convertirlo a SDR (FFmpeg sin tone mapping, desactivado o demasiado lento: transcoding.tone_mapping)"
+	}
+	return ""
+}
+
+// unsupportedSubtitle devuelve por qué el subtítulo elegido no se puede
+// entregar con lo que este servidor tiene, o vacío.
+func (s *Service) unsupportedSubtitle(o option) string {
 	d := o.decision
 	format, external := "", false
 	switch {
@@ -320,16 +344,6 @@ func (s *Service) unsupported(o option) string {
 		case s.Subtitles == nil:
 			return "Convertir este subtítulo necesita FFmpeg, que no está disponible"
 		}
-	}
-	switch {
-	case d.Mode == DirectPlay:
-		return ""
-	case s.Transcoder == nil:
-		return "FFmpeg no está disponible en el servidor"
-	case d.Protocol != protocol.ProtocolHLS:
-		return "Este archivo necesita remux o transcodificación, y el cliente no admite HLS"
-	case needsToneMap(d) && !s.Features.ToneMapping:
-		return "El vídeo es HDR y el cliente no, y este servidor no puede convertirlo a SDR (FFmpeg sin tone mapping, desactivado o demasiado lento: transcoding.tone_mapping)"
 	}
 	return ""
 }
@@ -397,7 +411,8 @@ func (s *Service) preferences(ctx context.Context, userID string) (Preferences, 
 	}
 	return Preferences{
 		AudioLanguage: deref(row.AudioLanguage), SubtitleLanguage: deref(row.SubtitleLanguage),
-		SubtitleMode: media.SubtitleMode(row.SubtitleMode),
+		SubtitleMode:     media.SubtitleMode(row.SubtitleMode),
+		MaxBitrateRemote: row.MaxBitrateRemote,
 	}, nil
 }
 
@@ -484,4 +499,17 @@ func deref64(n *int64) int64 {
 		return 0
 	}
 	return *n
+}
+
+// remoteLimit aplica el límite de bitrate remoto del usuario a una petición que
+// llega de fuera de la red local. Un límite de la petición más bajo manda.
+func remoteLimit(req Request, p Preferences) *int64 {
+	if !req.Remote || p.MaxBitrateRemote == nil {
+		return req.MaxBitrate
+	}
+	limit := *p.MaxBitrateRemote
+	if req.MaxBitrate != nil {
+		limit = min(limit, *req.MaxBitrate)
+	}
+	return &limit
 }

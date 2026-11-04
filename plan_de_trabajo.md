@@ -1,8 +1,8 @@
 # MediaNode — Plan de trabajo
 
-**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.10\
+**Base:** [`docs/documento_maestro_de_arquitectura.md`](docs/documento_maestro_de_arquitectura.md), versión 1.11\
 **Fecha:** 4 de noviembre de 2026\
-**Estado del repositorio:** alfa. Fases 0 a 10 completas y verificadas (con las salvedades de las Fases 8, 9 y 10), **hito H3 alcanzado**: los 14 criterios del MVP pasan en un Windows limpio y en Docker; la 11 (clientes móviles) es la siguiente
+**Estado del repositorio:** alfa. Fases 0 a 10 y 13 completas y verificadas (con las salvedades de las Fases 8, 9, 10 y 13), **hito H3 alcanzado**: los 14 criterios del MVP pasan en un Windows limpio y en Docker. La Fase 13 (DLNA y acceso remoto) está implementada y probada con un punto de control propio, **pero sin ningún televisor real**: su criterio de salida no se cumple. La 11 (clientes móviles) y la 12 (TV) siguen sin empezar
 
 Este plan convierte la arquitectura en trabajo ordenado, desde el diseño
 de tablas hasta la distribución. El DDL completo vive en la sección 6.2
@@ -2154,13 +2154,13 @@ func (s *Server) ConnectionManager(w, r)
 func (s *Server) ServeMedia(w, r)
 ```
 
-- [ ] SSDP, descripción XML y servicios SOAP.
-- [ ] Respuestas DIDL-Lite con MIME y `protocolInfo` por perfil.
-- [ ] `libraries.dlna_enabled` y advertencia en el panel.
-- [ ] Rechazar peticiones que no provengan de la red local.
-- [ ] Sesiones `client_kind = 'dlna'` con expiración por inactividad.
-- [ ] Direct Play y transcodificación a MPEG-TS con burn-in.
-- [ ] Matriz de renderers probados.
+- [x] SSDP, descripción XML y servicios SOAP.
+- [x] Respuestas DIDL-Lite con MIME y `protocolInfo` por perfil (sin `DLNA.ORG_PN`: ADR 0009).
+- [x] `libraries.dlna_enabled` y advertencia en el panel.
+- [x] Rechazar peticiones que no provengan de la red local.
+- [x] Sesiones `client_kind = 'dlna'` con expiración por inactividad.
+- [x] Direct Play y transcodificación a MPEG-TS con burn-in.
+- [ ] Matriz de renderers probados: **la tabla existe y está vacía** (`docs/dlna-renderers.md`); ningún televisor real probado.
 
 ### Remote Direct
 
@@ -2171,12 +2171,12 @@ func (r *Remote) RequireLocalAdmin(next http.Handler) http.Handler
 func (r *Remote) CheckReachability(ctx) (*Report, error)
 ```
 
-- [ ] Rutas HTTPS con certificado propio del usuario o reverse proxy.
-- [ ] `trusted_proxies` y clasificación local o remota de §14.4.
-- [ ] `remote.admin_enabled` aplicado a `/admin/*` y al panel.
-- [ ] Limitar bitrate remoto según `max_bitrate_remote`.
-- [ ] Verificación de conectividad desde fuera de la LAN.
-- [ ] Prueba de seguridad: fuerza bruta, CORS y rutas de administración.
+- [x] Rutas HTTPS con certificado propio del usuario o reverse proxy.
+- [x] `trusted_proxies` y clasificación local o remota de §14.4.
+- [x] `remote.admin_enabled` aplicado a `/admin/*` y al panel.
+- [x] Limitar bitrate remoto según `max_bitrate_remote`.
+- [x] Verificación de conectividad desde fuera de la LAN (prueba de alcance de un solo uso; simulada, no con un dominio real).
+- [x] Prueba de seguridad: fuerza bruta, CORS y rutas de administración.
 
 ### Remote Relay
 
@@ -2189,6 +2189,78 @@ Solo si existe demanda demostrada, tras cerrar §26.5.
 **Criterio de salida:** DLNA en tres renderers de fabricantes distintos y
 acceso remoto cifrado desde fuera de la LAN, con administración bloqueada
 por defecto.
+
+### Resultado de la Fase 13
+
+**Implementada y probada con herramientas propias; el criterio de salida NO se
+cumple**: no hay un solo televisor ni reproductor DLNA real probado, y el acceso
+remoto no se ha probado con un dominio, un puerto reenviado y un teléfono con datos
+móviles. Decisiones y límites en el ADR 0009.
+
+**Qué se entrega:** clasificación local o remota en una sola función (§14.4), puerta
+de acceso remoto (cerrada por defecto), administración y panel cerrados desde fuera,
+HTTPS con certificado propio (recarga automática), bitrate remoto por usuario,
+informe de conectividad y prueba de alcance desde fuera de un solo uso, y el servidor
+DLNA entero (SSDP, descripción, ContentDirectory, ConnectionManager, original con
+rangos y MPEG-TS con salto por tiempo y subtítulos grabados).
+
+**Hallazgos de probar de verdad:**
+
+1. **Un defecto de la Fase 9.** `decide` solo recogía el primer motivo de
+   incompatibilidad del vídeo: un HEVC HDR que el cliente no admitía por el códec
+   perdía el motivo `hdr_unsupported`, y se recodificaba **sin tone mapping** (color
+   lavado, sin ningún error). Lo destapó el perfil de DLNA y lo vio la prueba de
+   mutación (`case needsToneMap(...)` sobrevivía). Corregido, con casos en
+   `decide_test`.
+2. **Un mutante que habría hecho caer el servidor**: `MX: 0` en un `M-SEARCH` hacía
+   que el retraso al azar llamara a `rand.Int64N(0)`, que entra en pánico. El código
+   lo evitaba, pero ninguna prueba lo comprobaba.
+3. La respuesta a `ssdp:all` debe llevar el destino concreto en `ST`, no `ssdp:all`
+   (UDA 1.0 §1.3.3); lo vio la primera prueba de SSDP.
+4. Un fallo de mi herramienta: `netcheck` no pedía el escaneo de la biblioteca (una
+   biblioteca nueva no se escanea sola) y creía que `Browse` fallaba.
+5. En Windows, el directorio de trabajo de un proceso vivo no se puede borrar:
+   una prueba del recolector pasaba aunque el código estuviera mal. Ahora se prueba
+   sin FFmpeg, con un flujo registrado a mano.
+6. **Cambio de comportamiento a tener en cuenta**: un servidor detrás de un reverse
+   proxy que no estaba declarado en `trusted_proxies` aceptaba a todos; ahora lo que
+   trae `X-Forwarded-For` de un origen no declarado se trata como remoto y, con el
+   acceso remoto apagado (lo normal), recibe `403 REMOTE_ACCESS_DISABLED`. El
+   registro lo explica y `packaging/README.md` dice cómo declararlo.
+
+**Verificación con el binario real:** `scripts/netcheck`, 47 de 47 en Windows (FFmpeg
+9.0.2) y 47 de 47 en Linux (Alpine, FFmpeg 6.1.2): `M-SEARCH` por multidifusión desde
+un socket real (en Windows, compartiendo el 1900 con el servicio SSDP del sistema),
+descripción, `Browse`, rangos, MPEG-TS con salto, sesiones en el panel, clasificación
+con un proxy simulado, administración cerrada, HSTS, CORS, fuerza bruta por IP y por
+cuenta, prueba de alcance, y TLS (HTTP/2, sin TLS 1.0 ni 1.1). El CI la ejecuta en
+Ubuntu.
+
+**Pruebas de mutación:** 115 mutantes del código nuevo (clasificación y puerta,
+informe y prueba de alcance, TLS, límite de bitrate, planificación DLNA, SSDP, árbol y
+entrega, flujo MPEG-TS y sus cupos, sesiones DLNA, configuración, diagnóstico y
+rutas). La primera pasada dejó 24 supervivientes. Tras añadir pruebas y retirar
+código muerto (una rama de `Classify` que no se podía alcanzar) quedan **5
+equivalentes** (1 no compilaba y se descartó): `p.nonce = ""` tras el acierto (ya lo
+impide el estado de la prueba), la resolución máxima del perfil DLNA (igual que
+`MaxEncodeHeight`, 1080p), la comprobación de análisis en `resourceFor` (la repite
+`PlanDLNA`), la guarda de transcodificador nulo en `serveTS` (también la hace
+`PlanDLNA`) y el patrón del identificador en `serveArt` (la consulta ya está
+parametrizada y `images.Open` rechaza rutas que salen).
+
+**Sin verificar:**
+
+- **Ningún renderer DLNA real** (`docs/dlna-renderers.md`: la matriz está vacía a
+  propósito). El criterio exige tres de fabricantes distintos.
+- El acceso remoto cifrado **desde fuera de la LAN de verdad**.
+- macOS (SSDP no se ha ejecutado) y un Linux con multidifusión real entre equipos.
+- Eventos UPnP, `Search`, subtítulos externos por DLNA, `DLNA.ORG_PN`,
+  `X_MS_MediaReceiverRegistrar` (Windows Media Player y Xbox) y `PrepareForConnection`.
+- Que el flujo en trozos (sin `Content-Length`) lo acepten todos los televisores.
+- El certificado generado para la LAN y mDNS (Fase 11) y Remote Relay (sin demanda).
+
+**Estado del criterio:** no cumplido. Cumplido y verificado todo lo que se puede
+comprobar sin televisores ni un dominio público.
 
 ------------------------------------------------------------------------
 

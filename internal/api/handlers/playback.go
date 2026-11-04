@@ -17,6 +17,7 @@ import (
 	"medianode/internal/media"
 	"medianode/internal/playback"
 	"medianode/internal/protocol"
+	"medianode/internal/remote"
 	"medianode/internal/sessions"
 )
 
@@ -60,6 +61,7 @@ func (h *Playback) CreateSession(w http.ResponseWriter, r *http.Request) {
 		SubtitleID: req.SelectedSubtitleID, MaxBitrate: req.MaxBitrate, MaxResolution: req.MaxResolution,
 		PreferredProtocol: req.PreferredProtocol, StartPositionMS: req.StartPositionMS,
 		ClientIP: h.Network.ClientIP(r),
+		Remote:   h.Network.Classify(r) == remote.OriginRemote,
 	})
 	if err != nil {
 		api.WriteFailure(w, r, h.Log, err)

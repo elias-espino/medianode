@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 	"medianode/internal/authorization"
 	"medianode/internal/core"
 	"medianode/internal/media"
+	"medianode/internal/remote"
 )
 
 // Credenciales del cliente web de §15.4.
@@ -25,8 +25,8 @@ const (
 	CookieCSRF    = "mn_csrf"
 	HeaderCSRF    = "X-MediaNode-CSRF"
 
-	headerForwardedFor   = "X-Forwarded-For"
-	headerForwardedProto = "X-Forwarded-Proto"
+	headerForwardedFor   = remote.HeaderForwardedFor
+	headerForwardedProto = remote.HeaderForwardedProto
 	bearerPrefix         = "Bearer "
 )
 
@@ -156,66 +156,10 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// Network interpreta las cabeceras de reenvío, que solo cuentan si la conexión
-// llega desde un proxy de confianza (§14.4).
-type Network struct {
-	trusted []netip.Prefix
-}
+// Network interpreta el origen de una petición: las cabeceras de reenvío solo
+// cuentan si la conexión llega desde un proxy de confianza (§14.4). La
+// implementación está en el paquete remote.
+type Network = remote.Network
 
 // NewNetwork acepta direcciones sueltas y rangos, ya validados por la configuración.
-func NewNetwork(trusted []string) *Network {
-	n := &Network{}
-	for _, s := range trusted {
-		if p, err := netip.ParsePrefix(s); err == nil {
-			n.trusted = append(n.trusted, p)
-		} else if a, err := netip.ParseAddr(s); err == nil {
-			n.trusted = append(n.trusted, netip.PrefixFrom(a, a.BitLen()))
-		}
-	}
-	return n
-}
-
-func (n *Network) isTrusted(a netip.Addr) bool {
-	return slices.ContainsFunc(n.trusted, func(p netip.Prefix) bool { return p.Contains(a.Unmap()) })
-}
-
-func peerAddr(r *http.Request) (netip.Addr, bool) {
-	ap, err := netip.ParseAddrPort(r.RemoteAddr)
-	if err != nil {
-		return netip.Addr{}, false
-	}
-	return ap.Addr(), true
-}
-
-// ClientIP recorre X-Forwarded-For desde el final: lo que hay a la izquierda del
-// último proxy de confianza lo escribe el cliente y puede ser falso.
-func (n *Network) ClientIP(r *http.Request) string {
-	peer, ok := peerAddr(r)
-	if !ok {
-		return r.RemoteAddr
-	}
-	if !n.isTrusted(peer) {
-		return peer.String()
-	}
-	hops := strings.Split(r.Header.Get(headerForwardedFor), ",")
-	for _, hop := range slices.Backward(hops) {
-		a, err := netip.ParseAddr(strings.TrimSpace(hop))
-		if err != nil {
-			break
-		}
-		peer = a
-		if !n.isTrusted(a) {
-			break
-		}
-	}
-	return peer.String()
-}
-
-// Secure indica si la conexión del cliente va cifrada.
-func (n *Network) Secure(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	peer, ok := peerAddr(r)
-	return ok && n.isTrusted(peer) && r.Header.Get(headerForwardedProto) == "https"
-}
+func NewNetwork(trusted []string) *Network { return remote.NewNetwork(trusted) }

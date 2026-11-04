@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"medianode/internal/ffmpeg"
+	"medianode/internal/remote"
 )
 
 // Estados de una comprobación.
@@ -44,7 +46,7 @@ func (s *Service) SystemCheck(ctx context.Context) []Check {
 		s.checkTempSpace(),
 		s.checkDatabase(ctx),
 		s.checkPort(ctx),
-		s.checkDiscovery(),
+		s.checkDiscovery(ctx),
 		s.checkTLS(),
 		s.checkRemote(),
 	}
@@ -261,22 +263,47 @@ func (s *Service) checkPort(ctx context.Context) Check {
 	return check(id, name, CheckOK, "Escuchando en %s.", addr)
 }
 
-func (s *Service) checkDiscovery() Check {
-	return check("discovery", "mDNS y SSDP", CheckSkipped, "Todavía no están implementados (descubrimiento y DLNA, fases 13).")
+func (s *Service) checkDiscovery(ctx context.Context) Check {
+	const id, name = "discovery", "DLNA y descubrimiento"
+	if !s.Config.Discovery.DLNAEnabled {
+		return check(id, name, CheckSkipped, "DLNA está desactivado (discovery.dlna_enabled). El descubrimiento mDNS de MediaNode llega con los clientes móviles.")
+	}
+	libs, err := s.DB.R.ListDLNALibraries(ctx)
+	switch {
+	case err != nil:
+		return check(id, name, CheckFail, "No se pudo leer las bibliotecas publicadas: %v", err)
+	case len(libs) == 0:
+		return check(id, name, CheckWarn, "DLNA está activo, pero ninguna biblioteca se publica (dlna_enabled): los televisores verán un servidor vacío.")
+	}
+	return check(id, name, CheckOK, "DLNA activo con %d biblioteca(s) publicada(s). Cualquier equipo de la red local las ve sin contraseña.", len(libs))
 }
 
 func (s *Service) checkTLS() Check {
-	if s.Config.Server.HTTPSEnabled {
-		return check("tls", "Certificado TLS", CheckWarn, "server.https_enabled está activo, pero el servidor todavía no sirve HTTPS.")
+	const id, name = "tls", "Certificado TLS"
+	c := s.Config.Server
+	if !c.HTTPSEnabled {
+		return check(id, name, CheckSkipped, "HTTPS no está activado: el servidor solo escucha en HTTP, sin cifrar.")
 	}
-	return check("tls", "Certificado TLS", CheckSkipped, "HTTPS no está activado.")
+	host := ""
+	if u, err := url.Parse(s.Config.Remote.PublicURL); err == nil {
+		host = u.Hostname()
+	}
+	r := remote.CheckCertificate(c.TLSCertFile, host, time.Now())
+	return check(id, name, r.Status, "%s", r.Detail)
 }
 
 func (s *Service) checkRemote() Check {
-	if s.Config.Remote.Enabled {
-		return check("remote", "Conectividad remota", CheckWarn, "remote.enabled está activo, pero el acceso remoto todavía no está implementado.")
+	const id, name = "remote", "Acceso remoto"
+	c := s.Config.Remote
+	switch {
+	case !c.Enabled || !c.DirectEnabled:
+		return check(id, name, CheckSkipped, "Desactivado: el servidor solo responde en la red local.")
+	case c.AdminEnabled:
+		return check(id, name, CheckWarn, "Activo, con la administración abierta a Internet (remote.admin_enabled). Desactívala salvo que la necesites.")
+	case c.PublicURL == "":
+		return check(id, name, CheckWarn, "Activo, pero falta remote.public_url: sin ella no se puede comprobar el alcance desde fuera.")
 	}
-	return check("remote", "Conectividad remota", CheckSkipped, "El acceso remoto no está activado.")
+	return check(id, name, CheckOK, "Activo en %s, con la administración bloqueada. La conectividad se comprueba en la pestaña Red.", c.PublicURL)
 }
 
 // human formatea bytes en la unidad binaria que corresponda.

@@ -27,6 +27,7 @@ import (
 	"medianode/internal/monitoring"
 	"medianode/internal/playback"
 	"medianode/internal/readmodel"
+	"medianode/internal/remote"
 	"medianode/internal/sessions"
 	"medianode/internal/transcoding"
 	"medianode/internal/users"
@@ -38,6 +39,7 @@ const (
 	loginPerMinute   = 20
 	setupPerMinute   = 10
 	pairingPerMinute = 10
+	probePerMinute   = 20
 )
 
 // Deps agrupa lo que necesitan las rutas.
@@ -69,11 +71,32 @@ type Deps struct {
 	Web            http.Handler // Panel web; nil sin compilar.
 	TrustedProxies []string
 	CORSOrigins    []string
+	// Remote aplica la política de acceso remoto (§14). Nil: todo se trata como
+	// red local, que es lo que necesitan las pruebas de módulos sueltos.
+	Remote *remote.Remote
+	// DLNA atiende /dlna/*; nil lo desactiva (discovery.dlna_enabled). Se
+	// publica sin sesión: un renderer no se autentica, y el propio manejador solo
+	// responde a la red local.
+	DLNA http.Handler
+}
+
+// UPnP añade dos métodos HTTP a los estándar: el enrutador debe conocerlos antes
+// de construir ninguna ruta.
+func init() {
+	chi.RegisterMethod("SUBSCRIBE")
+	chi.RegisterMethod("UNSUBSCRIBE")
 }
 
 // NewRouter construye el enrutador con sus middlewares.
 func NewRouter(deps Deps) http.Handler {
 	network := middleware.NewNetwork(deps.TrustedProxies)
+	// localAdmin cierra la administración a las peticiones de fuera de la red
+	// local; sin módulo remoto no hace nada.
+	localAdmin := func(next http.Handler) http.Handler { return next }
+	if deps.Remote != nil {
+		network = deps.Remote.Net
+		localAdmin = deps.Remote.RequireLocalAdmin
+	}
 
 	r := chi.NewRouter()
 
@@ -83,6 +106,9 @@ func NewRouter(deps Deps) http.Handler {
 	}
 	r.Use(middleware.AccessLog(deps.Log))
 	r.Use(middleware.Recover(deps.Log))
+	if deps.Remote != nil {
+		r.Use(deps.Remote.Gate)
+	}
 	r.Use(middleware.CORS(deps.CORSOrigins))
 	r.Use(middleware.LimitBody(middleware.MaxBodyBytes))
 
@@ -98,9 +124,12 @@ func NewRouter(deps Deps) http.Handler {
 		Started: deps.Started, FFprobeAvailable: deps.FFprobe, Transcoder: deps.Transcoder, Catalog: deps.Catalog, Enricher: deps.Enricher,
 		FFmpeg: deps.FFmpeg,
 	}
+	if deps.Remote != nil {
+		server.AdminAvailable = deps.Remote.AdminAllowed
+	}
 	mediaH := &handlers.Media{Catalog: deps.Catalog, Metadata: deps.Metadata, Images: deps.Images, Log: deps.Log}
 	playbackH := &handlers.Playback{Sessions: deps.Sessions, Progress: deps.Progress, Playback: deps.Playback, Network: network, Log: deps.Log}
-	adminH := &handlers.Admin{Transcoder: deps.Transcoder, Sessions: deps.Sessions, Service: deps.Admin, Log: deps.Log}
+	adminH := &handlers.Admin{Transcoder: deps.Transcoder, Sessions: deps.Sessions, Service: deps.Admin, Remote: deps.Remote, Log: deps.Log}
 	streamH := &handlers.Stream{DB: deps.DB, Sessions: deps.Sessions, Playback: deps.Playback, Transcoder: deps.Transcoder, Log: deps.Log}
 	eventsH := &websocket.Handler{
 		Bus: deps.Bus, Libs: deps.Authorizer, Authenticate: deps.Auth.Authenticate,
@@ -136,6 +165,14 @@ func NewRouter(deps Deps) http.Handler {
 		r.With(middleware.RateLimit(auth.NewLimiter(pairingPerMinute), network)).Post("/auth/pairing", authH.CreatePairing)
 		r.Post("/auth/refresh", authH.Refresh)
 		r.Post("/auth/pairing/token", authH.PairingToken)
+		if deps.Remote != nil {
+			// La abre quien está fuera de la red local, sin sesión: la protege un
+			// código de un solo uso de 256 bits que caduca.
+			r.With(middleware.RateLimit(auth.NewLimiter(probePerMinute), network)).
+				Get("/remote/probe/{nonce}", func(w http.ResponseWriter, req *http.Request) {
+					deps.Remote.HandleProbe(w, req, chi.URLParam(req, "nonce"))
+				})
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Authenticate(deps.Auth, deps.Log))
@@ -157,12 +194,14 @@ func NewRouter(deps Deps) http.Handler {
 			// Cada operación comprueba su permiso sobre la biblioteca: manage
 			// permite editarla a quien no es administrador.
 			r.Get("/libraries", librariesH.List)
-			r.Post("/libraries", librariesH.Create)
+			// Crear, editar y borrar bibliotecas, y sus rutas, decide qué carpetas del
+			// servidor se exponen: es administración y, como ella, solo desde la red local.
+			r.With(localAdmin).Post("/libraries", librariesH.Create)
 			r.Get("/libraries/{id}", librariesH.Get)
-			r.Patch("/libraries/{id}", librariesH.Update)
-			r.Delete("/libraries/{id}", librariesH.Delete)
-			r.Post("/libraries/{id}/paths", librariesH.AddPath)
-			r.Delete("/libraries/{id}/paths/{pathId}", librariesH.RemovePath)
+			r.With(localAdmin).Patch("/libraries/{id}", librariesH.Update)
+			r.With(localAdmin).Delete("/libraries/{id}", librariesH.Delete)
+			r.With(localAdmin).Post("/libraries/{id}/paths", librariesH.AddPath)
+			r.With(localAdmin).Delete("/libraries/{id}/paths/{pathId}", librariesH.RemovePath)
 			r.Post("/libraries/{id}/scan", librariesH.StartScan)
 			r.Get("/libraries/{id}/scan", librariesH.ScanStatus)
 			r.Get("/libraries/{id}/items", mediaH.ListItems)
@@ -197,12 +236,15 @@ func NewRouter(deps Deps) http.Handler {
 			r.Get("/events", eventsH.ServeHTTP)
 
 			r.Group(func(r chi.Router) {
+				r.Use(localAdmin)
 				r.Use(middleware.RequireRole(media.RoleAdmin))
 
 				r.Get("/admin/system", adminH.System)
 				r.Get("/admin/metrics", adminH.Metrics)
 				r.Get("/admin/sessions", adminH.ActiveSessions)
 				r.Get("/admin/network", adminH.Network)
+				r.Get("/admin/remote", adminH.RemoteReport)
+				r.Post("/admin/remote/probe", adminH.StartRemoteProbe)
 				r.Get("/admin/storage", adminH.Storage)
 				r.Get("/admin/logs", adminH.Logs)
 				r.Get("/admin/settings", adminH.Settings)
@@ -220,10 +262,18 @@ func NewRouter(deps Deps) http.Handler {
 		})
 	})
 
+	if deps.DLNA != nil {
+		r.Handle("/dlna/*", deps.DLNA)
+	}
+
 	// El panel ocupa el resto de rutas; las de /api/v1 sin coincidencia ya
 	// respondieron 404 en su propio subenrutador.
 	if deps.Web != nil {
-		r.Handle("/*", deps.Web)
+		panel := deps.Web
+		if deps.Remote != nil {
+			panel = deps.Remote.GuardPanel(panel)
+		}
+		r.Handle("/*", panel)
 	}
 
 	return r

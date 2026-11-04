@@ -6,9 +6,15 @@ server:
   name: "MediaNode"
   bind_address: "0.0.0.0"
   http_port: 8420
-  # HTTPS estará disponible cuando exista el certificado propio (Fase 11).
+  # HTTPS con el certificado del propio usuario (el certificado generado por el
+  # servidor llega con los clientes móviles). El archivo se recarga solo al
+  # renovarlo. Sin esto, el acceso desde Internet exige un reverse proxy.
   https_enabled: false
   https_port: 8421
+  tls_cert_file: ""   # Ruta del certificado (cadena completa, PEM).
+  tls_key_file: ""    # Ruta de la clave privada (PEM).
+  # Direcciones o rangos CIDR de los reverse proxies. Solo de ellos se acepta
+  # X-Forwarded-For; de cualquier otro origen esas cabeceras hacen la petición remota.
   trusted_proxies: []
   # Orígenes web admitidos además del propio, como "https://media.example.com".
   cors_origins: []
@@ -62,11 +68,28 @@ sessions:
   completed_threshold_percent: 90
 
 discovery:
-  mdns_enabled: true
+  mdns_enabled: true   # El anuncio mDNS de MediaNode llega con los clientes móviles; hoy no hace nada.
+  # DLNA publica las bibliotecas con dlna_enabled (se marcan en el panel, una a
+  # una). Los televisores no usan contraseña: cualquier equipo de la red local ve
+  # lo que se publique. Nunca responde fuera de la red local.
   dlna_enabled: false
 
+dlna:
+  # auto: el original si un televisor genérico lo admite (H.264 o MPEG-2 en MP4 o
+  # MPEG-TS, audio AAC, MP3 o AC-3 estéreo, hasta 1080p) y, si no, MPEG-TS.
+  # direct: siempre el original. transcode: siempre MPEG-TS.
+  mode: "auto"
+  # auto: graba en la imagen el subtítulo forzado (o el del idioma preferido si el
+  # audio es de otro) al recodificar; off: nunca. Un televisor no elige pistas.
+  burn_subtitles: "auto"
+  idle_timeout_seconds: 120
+
+# Acceso desde fuera de la red local (§14). Todo desactivado: el servidor solo
+# responde a la red local, y lo de fuera recibe 403.
 remote:
   enabled: false
-  direct_enabled: false
-  relay_enabled: false
-  admin_enabled: false
+  direct_enabled: false      # Exige HTTPS propio o un proxy en server.trusted_proxies.
+  relay_enabled: false       # Aún no disponible.
+  admin_enabled: false       # Abre el panel de administración a Internet: déjalo en false.
+  public_url: ""             # https://media.example.com, sin ruta; para comprobar la conectividad.
+  local_networks: []         # CIDR que cuentan como red local además de las privadas, como una VPN (100.64.0.0/10).

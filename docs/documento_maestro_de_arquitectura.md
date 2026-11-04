@@ -18,7 +18,7 @@ multiplataforma
   Nombre                              MediaNode --- Technical Design
                                       Document
 
-  Versión                             1.10
+  Versión                             1.11
 
   Estado                              Propuesta técnica de referencia
                                       para iniciar el desarrollo
@@ -1846,6 +1846,20 @@ Política de acceso DLNA:
 -   Como no envían heartbeat, expiran por inactividad de las peticiones
     HTTP.
 
+**Implementación (Fase 13, ADR 0009).** Un único árbol: raíz → bibliotecas
+con `dlna_enabled` → elementos (las series, en temporadas y episodios). Solo se
+publica lo reproducible. `dlna.mode` decide la entrega: `auto` (el original si un
+perfil genérico —H.264 o MPEG-2 en MP4 o MPEG-TS, audio AAC, MP3 o AC-3
+estéreo, hasta 1080p— lo admite; si no, MPEG-TS), `direct` o `transcode`. El
+MPEG-TS es un único FFmpeg que escribe en la respuesta, con salto por
+`TimeSeekRange.dlna.org`, subtítulos forzados grabados (`dlna.burn_subtitles`) y
+los mismos cupos que HLS. Los `protocolInfo` no llevan `DLNA.ORG_PN`: un perfil
+mal declarado hace que un televisor estricto rechace el elemento. No se envían
+eventos UPnP ni existe `Search`. Las sesiones DLNA caducan por
+`dlna.idle_timeout_seconds`, y se renuevan mientras haya una respuesta abierta.
+SSDP solo responde a direcciones locales de las redes del equipo. **No se ha
+probado con ningún televisor real** (`docs/dlna-renderers.md`).
+
 # 14. Acceso remoto
 
 ## 14.1 Modalidades
@@ -1908,6 +1922,20 @@ y puede reservarse para una fase posterior.
 -   Evitar exposición de puertos de administración.
 -   No utilizar UPnP IGD para abrir puertos automáticamente sin
     consentimiento explícito del usuario.
+
+**Implementación (Fase 13, ADR 0009).** La clasificación local o remota es una
+sola función (`remote.Network.Classify`): una dirección privada, de bucle o de
+enlace local es local; una cabecera de reenvío desde un origen que no es proxy de
+confianza, o un proxy de confianza sin cabecera legible, hace la petición
+**remota**. Con `remote.enabled` y `remote.direct_enabled` apagados (por defecto)
+lo que no es local recibe `403 REMOTE_ACCESS_DISABLED`; `/admin/*` y la
+administración de bibliotecas, `403 REMOTE_ADMIN_DISABLED` salvo
+`remote.admin_enabled`. `remote.direct_enabled` exige HTTPS propio
+(`server.tls_cert_file` y `tls_key_file`, con recarga automática, TLS 1.2 como
+mínimo) o un proxy declarado. `users.max_bitrate_remote` se aplica a las
+peticiones remotas. La conectividad se comprueba con `GET /admin/remote` y con
+una prueba de alcance de un solo uso que se abre desde otra red. El certificado
+autogenerado para la LAN sigue pendiente (Fase 11).
 
 # 15. Autenticación, autorización y perfiles
 
@@ -2133,6 +2161,9 @@ las recibe como URL opaca al crear la sesión.
   GET      `/admin/metrics`                  Métricas de §22.2
   GET      `/admin/sessions`                 Sesiones activas
   GET      `/admin/network`                  Red y direcciones
+  GET      `/admin/remote`                   Conectividad del acceso remoto
+  POST     `/admin/remote/probe`             Prueba de alcance desde fuera
+  GET      `/remote/probe/{nonce}`           Abrir la prueba (pública, un solo uso)
   GET      `/admin/transcodes`               Trabajos FFmpeg
   POST     `/admin/transcodes/{id}/cancel`   Cancelar trabajo
   GET      `/admin/logs`                     Logs consultables
@@ -2376,9 +2407,10 @@ FFmpeg, FFprobe, códecs (`libx264`), aceleración por hardware (los
 codificadores compilados que no inician son un aviso, no un fallo), conversión
 de HDR (con su velocidad medida), permisos de las bibliotecas, espacio temporal
 frente a `transcoding.max_disk_gb`, SQLite (`PRAGMA quick_check` y modo de
-journal), puerto, mDNS y SSDP, TLS y conectividad remota. Las tres últimas
-todavía no existen y salen `skipped` (o `warn` si están activadas en la
-configuración).
+journal), puerto, mDNS y SSDP, TLS y conectividad remota. Desde la Fase 13,
+DLNA, el certificado TLS y el acceso remoto se comprueban de verdad (certificado
+vigente y con el nombre de `remote.public_url`, DNS, administración abierta a
+Internet, bibliotecas publicadas); mDNS sigue sin existir.
 
 Las bibliotecas en una **unidad de red con letra** (`Z:\`) salen como `warn` en
 Windows: un servicio no las ve (§21.2); hay que registrarlas con su ruta UNC.
@@ -2412,8 +2444,10 @@ server:
   name: "MediaNode"
   bind_address: "0.0.0.0"
   http_port: 8420
-  https_enabled: true
+  https_enabled: true       # hoy exige el certificado del usuario (Fase 13)
   https_port: 8421
+  tls_cert_file: ""         # Fase 13: se recarga solo al renovarlo
+  tls_key_file: ""
   trusted_proxies: []
   cors_origins: []
   shutdown_timeout_seconds: 30
@@ -2463,11 +2497,18 @@ discovery:
   mdns_enabled: true
   dlna_enabled: false
 
+dlna:                      # Fase 13
+  mode: auto               # auto, direct o transcode
+  burn_subtitles: auto     # auto u off
+  idle_timeout_seconds: 120
+
 remote:
   enabled: false
   direct_enabled: false
-  relay_enabled: false
+  relay_enabled: false      # no disponible todavía
   admin_enabled: false
+  public_url: ""            # https://media.example.com
+  local_networks: []        # CIDR extra tratados como red local (una VPN)
 ```
 
 Los valores son defaults ilustrativos. SSDP se activa junto con DLNA. El
@@ -2534,7 +2575,7 @@ plataformas. - Proveedores de metadatos e imágenes.
 **Auditoría (Fase 10): `docs/licencias-ffmpeg.md`.** Los archivos de las
 versiones no incluyen FFmpeg; la imagen de Docker instala el de Alpine (GPL,
 con `libx264`) al construirse, y se niega a construirse con una build
-`--enable-nonfree`. Las 26 dependencias de Go del servidor son MIT, BSD,
+`--enable-nonfree`. Las 27 dependencias de Go del servidor son MIT, BSD,
 Apache-2.0 o ISC.
 
 # 22. Observabilidad y soporte

@@ -1162,6 +1162,51 @@ paths:
               schema: { $ref: "#/components/schemas/AdminNetwork" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /admin/remote:
+    get:
+      summary: Comprobaciones de conectividad del acceso remoto
+      description: >-
+        Certificado, DNS, conexión a la dirección pública y estado de la prueba
+        desde fuera de la red local. Con el acceso remoto desactivado no sale a la
+        red. Solo administradores, y solo desde la red local salvo que
+        remote.admin_enabled lo permita.
+      responses:
+        "200":
+          description: Informe
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemoteReport" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /admin/remote/probe:
+    post:
+      summary: Iniciar la prueba de alcance desde fuera de la red local
+      description: >-
+        Genera un código de un solo uso (10 minutos) y devuelve la URL que hay que
+        abrir desde otra red, por ejemplo con datos móviles. Sustituye a la
+        prueba anterior.
+      responses:
+        "200":
+          description: Prueba pendiente
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemoteProbe" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /remote/probe/{nonce}:
+    get:
+      summary: Abrir la prueba de alcance
+      description: >-
+        La abre quien está fuera de la red local, sin sesión. Con el código vigente
+        responde 200 en texto plano; con cualquier otro, 404. Si la petición llega
+        desde la red local no prueba nada y el código sigue valiendo.
+      security: []
+      parameters:
+        - { name: nonce, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Texto plano con el resultado }
+        "404": { $ref: "#/components/responses/Error" }
   /admin/storage:
     get:
       summary: Uso de disco de los datos y de las bibliotecas
@@ -1294,12 +1339,13 @@ components:
         status: { type: string }
     ServerInfo:
       type: object
-      required: [name, version, protocol_version, setup_required]
+      required: [name, version, protocol_version, setup_required, admin_available]
       properties:
         name: { type: string }
         version: { type: string }
         protocol_version: { type: integer }
         setup_required: { type: boolean }
+        admin_available: { type: boolean, description: La administración es accesible para esta petición (no, desde fuera de la red local sin remote.admin_enabled). }
     ServerVersion:
       type: object
       required: [version, protocol_version]
@@ -1935,7 +1981,7 @@ components:
         device_id: { type: string }
     AdminNetwork:
       type: object
-      required: [bind_address, http_port, https_enabled, trusted_proxies, cors_origins, addresses, connections_local, connections_remote]
+      required: [bind_address, http_port, https_enabled, trusted_proxies, cors_origins, addresses, connections_local, connections_remote, tls_enabled, remote_enabled, remote_admin_enabled, public_url, local_networks, dlna_enabled]
       properties:
         bind_address: { type: string }
         http_port: { type: integer }
@@ -1945,6 +1991,39 @@ components:
         addresses: { type: array, items: { type: string }, description: URL por las que se llega desde la red local. }
         connections_local: { type: integer }
         connections_remote: { type: integer }
+        tls_enabled: { type: boolean }
+        remote_enabled: { type: boolean }
+        remote_admin_enabled: { type: boolean }
+        public_url: { type: string }
+        local_networks: { type: array, items: { type: string } }
+        dlna_enabled: { type: boolean }
+    RemoteCheck:
+      type: object
+      required: [id, name, status, detail]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [ok, warn, fail, skipped] }
+        detail: { type: string }
+    RemoteProbe:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [none, pending, reachable, local_only, expired] }
+        url: { type: string, description: URL que se abre desde fuera de la red local. }
+        expires_at: { type: string, format: date-time }
+        from: { type: string, description: Dirección desde la que llegó la petición de fuera. }
+        at: { type: string, format: date-time }
+    RemoteReport:
+      type: object
+      required: [enabled, direct_enabled, admin_enabled, public_url, checks, probe]
+      properties:
+        enabled: { type: boolean }
+        direct_enabled: { type: boolean }
+        admin_enabled: { type: boolean }
+        public_url: { type: string }
+        checks: { type: array, items: { $ref: "#/components/schemas/RemoteCheck" } }
+        probe: { $ref: "#/components/schemas/RemoteProbe" }
     AdminStorage:
       type: object
       required: [folders, database_bytes, data, libraries]

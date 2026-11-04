@@ -223,7 +223,7 @@ function Sessions() {
       <tbody>
         {list.data.map((s) => (
           <tr key={s.id}>
-            <td>{s.user || "—"}</td>
+            <td>{s.client_kind === "dlna" ? <span title="Un televisor o reproductor DLNA no tiene cuenta">DLNA</span> : s.user || "—"}</td>
             <td>{s.title}</td>
             <td>
               {modeLabels[s.mode] ?? s.mode}

@@ -108,6 +108,9 @@ export interface ServerInfo {
   version: string;
   protocol_version: number;
   setup_required: boolean;
+  // La administración es accesible desde donde llega esta petición: no lo es
+  // desde fuera de la red local salvo que el servidor lo permita.
+  admin_available: boolean;
 }
 
 export interface ServerStatus {

@@ -34,6 +34,9 @@ type Server struct {
 	Enricher         *metadata.Enricher
 	Transcoder       *transcoding.Manager
 	FFmpeg           *ffmpeg.Capabilities
+	// AdminAvailable dice si la administración es accesible para esa petición;
+	// nil la da por accesible. El panel lo usa para ocultar sus pantallas.
+	AdminAvailable func(*http.Request) bool
 }
 
 // Health responde a la supervisión. No requiere autenticación.
@@ -54,6 +57,7 @@ func (s *Server) Info(w http.ResponseWriter, r *http.Request) {
 		Version:         s.Version,
 		ProtocolVersion: ProtocolVersion,
 		SetupRequired:   setup,
+		AdminAvailable:  s.AdminAvailable == nil || s.AdminAvailable(r),
 	})
 }
 

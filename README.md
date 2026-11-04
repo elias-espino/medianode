@@ -51,9 +51,22 @@ external services required.
 - **Web panel.** A React panel embedded in the binary: first-run wizard,
   libraries, users, metadata, search and a player (Direct Play and HLS through
   hls.js) with audio and subtitle selectors.
+- **DLNA.** Off by default, published per library (`discovery.dlna_enabled` and a
+  switch on each library in the panel, with a warning: TVs have no password, so
+  anyone on the local network sees what you publish). SSDP discovery, a UPnP
+  MediaServer with ContentDirectory and ConnectionManager, the original file
+  with `Range`, or MPEG-TS (copying what it can, with seeking and burned-in
+  subtitles) when the TV cannot play it. It only answers the local network.
+- **Remote access.** Off by default: the server only answers the local network.
+  `remote.direct_enabled` accepts connections from outside with your own
+  certificate (`server.https_enabled`) or behind a reverse proxy
+  (`server.trusted_proxies`); the admin panel stays closed to them unless
+  `remote.admin_enabled` says otherwise. A per-user remote bitrate limit applies,
+  and the panel can test reachability from outside the LAN.
 
-**Not done yet:** native mobile and TV clients, DLNA, discovery on the local
-network, remote access, TLS and installers. HLS has been verified in Chromium
+**Not done yet:** native mobile and TV clients, mDNS discovery of MediaNode, the
+generated LAN certificate, Remote Relay and installers. **DLNA has not been tried
+on a real TV or player**: see [`docs/dlna-renderers.md`](docs/dlna-renderers.md). HLS has been verified in Chromium
 with hls.js; Safari, iOS and Android players are untested, and only software
 encoding (libx264) has been tried: hardware encoders are detected but
 unverified. Burning image subtitles (PGS, VobSub) is implemented but has not run

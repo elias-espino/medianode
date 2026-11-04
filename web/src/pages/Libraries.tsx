@@ -93,6 +93,17 @@ function CreateLibrary({ onCancel, onCreated }: { onCancel: () => void; onCreate
   );
 }
 
+// Un televisor no se autentica: lo que se publica por DLNA lo ve cualquier equipo de
+// la red local (§13.2). El aviso va antes de activarlo, no después.
+export function dlnaWarning(name: string): string {
+  return (
+    `¿Publicar «${name}» por DLNA?\n\n` +
+    "Los televisores y reproductores DLNA no usan contraseña: cualquier equipo conectado a tu red local podrá ver y reproducir esta biblioteca, " +
+    "sin cuenta y sin límites por usuario. No se publica fuera de tu red local.\n\n" +
+    "Además, DLNA tiene que estar activado en la configuración del servidor (discovery.dlna_enabled)."
+  );
+}
+
 function LibraryCard({ lib, onChange }: { lib: Library; onChange: () => void }) {
   const { isAdmin } = useSession();
   const [scan, setScan] = useState<ScanJob | null>(null);
@@ -159,6 +170,11 @@ function LibraryCard({ lib, onChange }: { lib: Library; onChange: () => void }) 
           </Link>
           <span className="muted small"> · {lib.type === "movies" ? "Películas" : "Series"}</span>
           {!lib.enabled && <span className="badge badge-failed">Desactivada</span>}
+          {lib.dlna_enabled && (
+            <span className="badge badge-warn" title="Cualquier equipo de la red local la ve sin contraseña">
+              DLNA
+            </span>
+          )}
         </div>
         <div className="row">
           <button className="btn" onClick={startScan} disabled={busy || running}>
@@ -172,6 +188,16 @@ function LibraryCard({ lib, onChange }: { lib: Library; onChange: () => void }) 
                 disabled={busy}
               >
                 {lib.enabled ? "Desactivar" : "Activar"}
+              </button>
+              <button
+                className="btn btn-ghost"
+                disabled={busy}
+                onClick={() => {
+                  if (!lib.dlna_enabled && !confirm(dlnaWarning(lib.name))) return;
+                  void act(() => api.patch(`/libraries/${lib.id}`, { dlna_enabled: !lib.dlna_enabled }));
+                }}
+              >
+                {lib.dlna_enabled ? "Dejar de publicar por DLNA" : "Publicar por DLNA"}
               </button>
               <button
                 className="btn btn-danger"

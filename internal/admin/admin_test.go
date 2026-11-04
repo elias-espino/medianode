@@ -395,16 +395,31 @@ func TestComprobacionDelEspacioTemporal(t *testing.T) {
 
 func TestComprobacionesQueNoAplican(t *testing.T) {
 	s := &Service{Config: *config.Default()}
-	for _, c := range []Check{s.checkDiscovery(), s.checkTLS(), s.checkRemote()} {
+	for _, c := range []Check{s.checkDiscovery(context.Background()), s.checkTLS(), s.checkRemote()} {
 		if c.Status != CheckSkipped {
 			t.Errorf("%+v", c)
 		}
 	}
-	s.Config.Server.HTTPSEnabled, s.Config.Remote.Enabled = true, true
-	for _, c := range []Check{s.checkTLS(), s.checkRemote()} {
-		if c.Status != CheckWarn || !strings.Contains(c.Message, "todavía no") {
-			t.Errorf("activado pero sin implementar: %+v", c)
-		}
+	s.Config.Server.HTTPSEnabled = true
+	if c := s.checkTLS(); c.Status != CheckFail || !strings.Contains(c.Message, "certificado") {
+		t.Errorf("HTTPS sin certificado legible: %+v", c)
+	}
+
+	s.Config.Remote.Enabled = true
+	if c := s.checkRemote(); c.Status != CheckSkipped {
+		t.Errorf("remote.enabled sin direct_enabled no abre nada: %+v", c)
+	}
+	s.Config.Remote.DirectEnabled = true
+	if c := s.checkRemote(); c.Status != CheckWarn || !strings.Contains(c.Message, "public_url") {
+		t.Errorf("sin dirección pública: %+v", c)
+	}
+	s.Config.Remote.PublicURL = "https://media.example.com"
+	if c := s.checkRemote(); c.Status != CheckOK {
+		t.Errorf("remoto bien configurado: %+v", c)
+	}
+	s.Config.Remote.AdminEnabled = true
+	if c := s.checkRemote(); c.Status != CheckWarn || !strings.Contains(c.Message, "administración") {
+		t.Errorf("administración abierta a Internet debe avisar: %+v", c)
 	}
 }
 

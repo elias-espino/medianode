@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"medianode/internal/config"
 	"medianode/internal/database"
 	"medianode/internal/devices"
+	"medianode/internal/dlna"
 	"medianode/internal/events"
 	"medianode/internal/ffmpeg"
 	"medianode/internal/images"
@@ -36,6 +38,7 @@ import (
 	"medianode/internal/playback"
 	"medianode/internal/probe"
 	"medianode/internal/readmodel"
+	"medianode/internal/remote"
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
 	"medianode/internal/storage"
@@ -161,6 +164,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	bus := events.NewBus()
 	sessionManager := sessions.New(db, bus, sessions.Options{
 		IdleTimeout:        time.Duration(cfg.Sessions.HeartbeatTimeoutSeconds) * time.Second,
+		DLNAIdleTimeout:    time.Duration(cfg.DLNA.IdleTimeoutSeconds) * time.Second,
 		FlushInterval:      time.Duration(cfg.Sessions.ProgressPersistIntervalSeconds) * time.Second,
 		CompletedThreshold: float64(cfg.Sessions.CompletedThresholdPercent) / 100,
 		TranscodeDir:       cfg.Paths.Transcodes,
@@ -275,11 +279,26 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	remoteAccess := remote.New(remote.Options{
+		Enabled: cfg.Remote.Enabled, Direct: cfg.Remote.DirectEnabled, AdminEnabled: cfg.Remote.AdminEnabled,
+		PublicURL: cfg.Remote.PublicURL, HTTPSEnabled: cfg.Server.HTTPSEnabled, TLSCertFile: cfg.Server.TLSCertFile,
+		TrustedProxies: cfg.Server.TrustedProxies, LocalNetworks: cfg.Remote.LocalNetworks, BindAddress: cfg.Server.BindAddress,
+	}, monitoring.Module(log, "remote"))
 	metrics := monitoring.NewMetrics()
 	adminService := &admin.Service{
 		Version: version, Started: time.Now(), ConfigPath: *configPath, Config: *cfg, DB: db,
 		FFmpegPath: ffmpegBin, FFprobePath: ffprobe, FFmpeg: ffcaps, Sessions: sessionManager, Transcoder: transcoder,
 		Metrics: metrics, CPU: monitoring.NewProcessSampler(),
+	}
+	var dlnaHandler http.Handler
+	if cfg.Discovery.DLNAEnabled {
+		dlnaServer := dlna.New(dlna.Options{
+			Name: cfg.Server.Name, Version: version, HTTPPort: cfg.Server.HTTPPort, BindAddress: cfg.Server.BindAddress,
+			Mode: cfg.DLNA.Mode, BurnSubtitles: cfg.DLNA.BurnSubtitles == "auto", Language: cfg.Metadata.Language,
+		}, db, playbackService, sessionManager, transcoder, remoteAccess.Net, monitoring.Module(log, "dlna"))
+		dlnaServer.Images = imageManager
+		manager.Register(dlnaServer)
+		dlnaHandler = dlnaServer.Handler()
 	}
 	router := routes.NewRouter(routes.Deps{
 		Admin:      adminService,
@@ -310,9 +329,22 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		Web:            web.Handler(),
 		TrustedProxies: cfg.Server.TrustedProxies,
 		CORSOrigins:    cfg.Server.CORSOrigins,
+		Remote:         remoteAccess,
+		DLNA:           dlnaHandler,
 	})
 	addr := net.JoinHostPort(cfg.Server.BindAddress, strconv.Itoa(cfg.Server.HTTPPort))
 	manager.Register(api.NewServer(addr, router, monitoring.Module(log, "http"), manager.Fatal))
+	if cfg.Server.HTTPSEnabled {
+		tlsAddr := net.JoinHostPort(cfg.Server.BindAddress, strconv.Itoa(cfg.Server.HTTPSPort))
+		tlsServer, err := api.NewTLSServer(tlsAddr, router, cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile,
+			monitoring.Module(log, "https"), manager.Fatal)
+		if err != nil {
+			log.Error().Err(err).Msg("no se pudo preparar HTTPS")
+			_ = db.Close()
+			return exitError
+		}
+		manager.Register(tlsServer)
+	}
 
 	if err := manager.Run(ctx); err != nil {
 		log.Error().Err(err).Msg("el servidor terminó con errores")

@@ -25,6 +25,7 @@ import (
 	"medianode/internal/config"
 	"medianode/internal/database"
 	"medianode/internal/devices"
+	"medianode/internal/dlna"
 	"medianode/internal/events"
 	"medianode/internal/ffmpeg"
 	"medianode/internal/images"
@@ -35,6 +36,7 @@ import (
 	"medianode/internal/playback"
 	"medianode/internal/probe"
 	"medianode/internal/readmodel"
+	"medianode/internal/remote"
 	"medianode/internal/scanner"
 	"medianode/internal/sessions"
 	"medianode/internal/subtitles"
@@ -73,6 +75,7 @@ type env struct {
 	indexer    *transcoding.Indexer
 	admin      *admin.Service
 	dataDir    string
+	dlna       *dlna.Server
 }
 
 func newEnv(t *testing.T) *env {
@@ -147,6 +150,25 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 		Transcodes: filepath.Join(dataDir, "transcodes"), Logs: filepath.Join(dataDir, "logs"), Backups: filepath.Join(dataDir, "backups"),
 	}
 	metrics := monitoring.NewMetrics()
+	remoteOpts := remote.Options{Enabled: true, Direct: true, AdminEnabled: true}
+	if eo.remote != nil {
+		remoteOpts = *eo.remote
+	}
+	remoteAccess := remote.New(remoteOpts, log)
+	var dlnaServer *dlna.Server
+	var dlnaHandler http.Handler
+	if eo.dlna != nil {
+		o := *eo.dlna
+		if o.Name == "" {
+			o.Name = "Prueba"
+		}
+		dlnaServer = dlna.New(o, db, ps, sm, tm, remoteAccess.Net, log)
+		dlnaServer.Images = imgs
+		if err := dlnaServer.Prepare(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		dlnaHandler = dlnaServer.Handler()
+	}
 	adminSvc := &admin.Service{
 		Version: "1.2.3", Started: time.Now(), ConfigPath: filepath.Join(dataDir, "server.yaml"), Config: cfg, DB: db,
 		FFmpegPath: eo.ffmpeg, FFprobePath: eo.ffprobe, FFmpeg: caps, Sessions: sm, Transcoder: tm,
@@ -154,6 +176,7 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 	}
 	return &env{t: t, code: code, logs: logs, db: db, imgDir: imgDir, sessions: sm, bus: bus, auth: a, devices: ds, playback: ps,
 		admin: adminSvc, dataDir: dataDir,
+		dlna:       dlnaServer,
 		transcoder: tm, indexer: indexer, h: NewRouter(Deps{
 			Admin: adminSvc, Metrics: metrics,
 			Log: log, Name: "Prueba", Version: "1.2.3",
@@ -162,6 +185,10 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 			Enricher: enricher, Images: imgs, Started: time.Now(),
 			Sessions: sm, Progress: sessions.NewProgress(db, authz, bus, 0.9), Bus: bus, Authorizer: authz,
 			Playback: ps, DB: db, Transcoder: tm, FFmpeg: caps,
+			Remote: remoteAccess, TrustedProxies: remoteOpts.TrustedProxies,
+			DLNA:        dlnaHandler,
+			CORSOrigins: eo.origins,
+			Web:         eo.web,
 		})}
 }
 
@@ -170,6 +197,15 @@ func newEnvOn(t *testing.T, db *database.DB, opts ...func(*envOptions)) *env {
 type envOptions struct {
 	ffmpeg, ffprobe string
 	heavy, light    int
+	// remote es la política de acceso remoto; nil, la más permisiva: todo vale
+	// desde cualquier origen, para las pruebas que no tratan de red.
+	remote *remote.Options
+	// dlna activa el servidor DLNA con estas opciones.
+	dlna *dlna.Options
+	// origins son los orígenes web admitidos además del propio (server.cors_origins).
+	origins []string
+	// web es el panel que sirve el enrutador; nil: sin panel.
+	web http.Handler
 }
 
 type call struct {
@@ -179,6 +215,7 @@ type call struct {
 	cookies      []*http.Cookie
 	csrf         string
 	remote       string
+	headers      map[string]string
 }
 
 func (e *env) do(c call) (*httptest.ResponseRecorder, map[string]any) {
@@ -204,6 +241,9 @@ func (e *env) do(c call) (*httptest.ResponseRecorder, map[string]any) {
 	}
 	if c.remote != "" {
 		r.RemoteAddr = c.remote
+	}
+	for k, v := range c.headers {
+		r.Header.Set(k, v)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, r)
@@ -329,6 +369,7 @@ var publicRoutes = []string{
 	"POST /api/v1/auth/refresh",
 	"POST /api/v1/auth/pairing",
 	"POST /api/v1/auth/pairing/token",
+	"GET /api/v1/remote/probe/{nonce}",
 }
 
 func walkRoutes(t *testing.T, h http.Handler, fn func(method, route string)) {

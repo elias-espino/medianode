@@ -142,9 +142,11 @@ type Manager struct {
 
 	failures atomic.Int64 // Trabajos de FFmpeg que terminaron con error desde el arranque.
 
-	mu      sync.Mutex
-	streams map[string]*stream
-	encoder ffmpeg.Encoder // Pasa a libx264 si el de hardware falla al arrancar.
+	mu       sync.Mutex
+	streams  map[string]*stream
+	pipes    map[string]*pipeJob // Flujos progresivos (DLNA), por trabajo.
+	pipeRefs map[string]int      // Flujos progresivos en curso por sesión.
+	encoder  ffmpeg.Encoder      // Pasa a libx264 si el de hardware falla al arrancar.
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -164,7 +166,7 @@ func NewManager(opts Options, db *database.DB, bus *events.Bus, adm *Admission, 
 	if opts.Encoder == "" {
 		opts.Encoder = ffmpeg.X264
 	}
-	return &Manager{opts: opts, db: db, bus: bus, log: log, admission: adm, streams: map[string]*stream{}, encoder: opts.Encoder}
+	return &Manager{opts: opts, db: db, bus: bus, log: log, admission: adm, streams: map[string]*stream{}, pipes: map[string]*pipeJob{}, pipeRefs: map[string]int{}, encoder: opts.Encoder}
 }
 
 // Dir es el directorio de trabajo: un subdirectorio por sesión.
@@ -763,6 +765,7 @@ func (m *Manager) OnSessionEnded(sessionID string) {
 }
 
 func (m *Manager) end(sessionID string) {
+	m.endPipes(sessionID)
 	m.mu.Lock()
 	st, ok := m.streams[sessionID]
 	delete(m.streams, sessionID)
@@ -831,7 +834,7 @@ func (m *Manager) Jobs() []JobInfo {
 		}
 		st.mu.Unlock()
 	}
-	return out
+	return append(out, m.pipeJobs()...)
 }
 
 // SessionOfJob devuelve la sesión de un trabajo activo.
@@ -874,6 +877,9 @@ func (m *Manager) collect() {
 	for _, e := range entries {
 		path := filepath.Join(m.opts.Dir, e.Name())
 		if _, ok := active[e.Name()]; !ok {
+			if m.pipeDirActive(e.Name()) {
+				continue
+			}
 			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > orphanAge {
 				_ = os.RemoveAll(path)
 			}

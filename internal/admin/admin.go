@@ -20,6 +20,7 @@ import (
 	"medianode/internal/database"
 	"medianode/internal/ffmpeg"
 	"medianode/internal/monitoring"
+	"medianode/internal/remote"
 	"medianode/internal/sessions"
 	"medianode/internal/transcoding"
 )
@@ -176,13 +177,13 @@ func (s *Service) ffprobeVersion(ctx context.Context) string {
 	return s.probeVer
 }
 
-// IsLocal indica si una IP es de la propia máquina o de la red local.
-func IsLocal(ip string) bool {
-	addr := net.ParseIP(strings.TrimSpace(ip))
-	if addr == nil {
-		return false
-	}
-	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
+// IsLocal indica si una IP es de la propia máquina o de la red local, sin los
+// rangos extra de remote.local_networks.
+func IsLocal(ip string) bool { return remote.NewNetwork(nil).IsLocalIP(ip) }
+
+// isLocal es IsLocal con los rangos de remote.local_networks de la configuración.
+func (s *Service) isLocal(ip string) bool {
+	return remote.NewNetwork(nil).WithLocal(s.Config.Remote.LocalNetworks).IsLocalIP(ip)
 }
 
 // SessionInfo es una sesión activa vista por el administrador.
@@ -225,7 +226,7 @@ func (s *Service) SessionList(ctx context.Context) []SessionInfo {
 		info := SessionInfo{
 			ID: sess.ID, User: user, Title: sess.Title, Mode: sess.Mode, Status: string(sess.Status),
 			PositionMS: sess.PositionMS, DurationMS: sess.DurationMS, StartedAt: database.FormatTime(sess.StartedAt),
-			ClientIP: sess.ClientIP, Local: IsLocal(sess.ClientIP), ClientKind: sess.ClientKind, DeviceID: sess.DeviceID,
+			ClientIP: sess.ClientIP, Local: s.isLocal(sess.ClientIP), ClientKind: sess.ClientKind, DeviceID: sess.DeviceID,
 			LastActivity: database.FormatTime(sess.LastActivity),
 		}
 		if j, ok := jobs[sess.ID]; ok {
@@ -261,7 +262,7 @@ func (s *Service) fileBitrate(ctx context.Context, fileID string) int64 {
 // vienen de fuera.
 func (s *Service) Connections() (local, remote int) {
 	for _, sess := range s.Sessions.Snapshots() {
-		if IsLocal(sess.ClientIP) {
+		if s.isLocal(sess.ClientIP) {
 			local++
 		} else {
 			remote++
@@ -277,6 +278,12 @@ type NetworkInfo struct {
 	HTTPSEnabled   bool     `json:"https_enabled"`
 	TrustedProxies []string `json:"trusted_proxies"`
 	CORSOrigins    []string `json:"cors_origins"`
+	TLSEnabled     bool     `json:"tls_enabled"`
+	RemoteEnabled  bool     `json:"remote_enabled"`
+	RemoteAdmin    bool     `json:"remote_admin_enabled"`
+	PublicURL      string   `json:"public_url"`
+	LocalNetworks  []string `json:"local_networks"`
+	DLNAEnabled    bool     `json:"dlna_enabled"`
 	Addresses      []string `json:"addresses"` // URL por las que se llega desde la red local.
 	Local          int      `json:"connections_local"`
 	Remote         int      `json:"connections_remote"`
@@ -287,9 +294,18 @@ func (s *Service) Network() NetworkInfo {
 	c := s.Config.Server
 	n := NetworkInfo{BindAddress: c.BindAddress, HTTPPort: c.HTTPPort, HTTPSEnabled: c.HTTPSEnabled,
 		TrustedProxies: nonNil(c.TrustedProxies), CORSOrigins: nonNil(c.CORSOrigins), Addresses: []string{}}
+	r := s.Config.Remote
+	n.TLSEnabled = c.HTTPSEnabled
+	n.RemoteEnabled = r.Enabled && r.DirectEnabled
+	n.RemoteAdmin = n.RemoteEnabled && r.AdminEnabled
+	n.PublicURL, n.LocalNetworks = r.PublicURL, nonNil(r.LocalNetworks)
+	n.DLNAEnabled = s.Config.Discovery.DLNAEnabled
 	n.Local, n.Remote = s.Connections()
 	for _, ip := range localAddresses(c.BindAddress) {
 		n.Addresses = append(n.Addresses, "http://"+net.JoinHostPort(ip, strconv.Itoa(c.HTTPPort)))
+		if c.HTTPSEnabled {
+			n.Addresses = append(n.Addresses, "https://"+net.JoinHostPort(ip, strconv.Itoa(c.HTTPSPort)))
+		}
 	}
 	return n
 }

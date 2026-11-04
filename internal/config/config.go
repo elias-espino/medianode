@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ type Config struct {
 	Sessions    Sessions    `yaml:"sessions"`
 	Discovery   Discovery   `yaml:"discovery"`
 	Remote      Remote      `yaml:"remote"`
+	DLNA        DLNA        `yaml:"dlna"`
 }
 
 // Server agrupa los parámetros de red.
@@ -50,6 +52,8 @@ type Server struct {
 	HTTPPort               int      `yaml:"http_port"`
 	HTTPSEnabled           bool     `yaml:"https_enabled"`
 	HTTPSPort              int      `yaml:"https_port"`
+	TLSCertFile            string   `yaml:"tls_cert_file"`
+	TLSKeyFile             string   `yaml:"tls_key_file"`
 	TrustedProxies         []string `yaml:"trusted_proxies"`
 	CORSOrigins            []string `yaml:"cors_origins"`
 	ShutdownTimeoutSeconds int      `yaml:"shutdown_timeout_seconds"`
@@ -127,6 +131,24 @@ type Remote struct {
 	DirectEnabled bool `yaml:"direct_enabled"`
 	RelayEnabled  bool `yaml:"relay_enabled"`
 	AdminEnabled  bool `yaml:"admin_enabled"`
+	// PublicURL es la dirección https por la que se llega desde fuera, sin ruta.
+	PublicURL string `yaml:"public_url"`
+	// LocalNetworks son rangos CIDR que cuentan como red local además de las
+	// direcciones privadas, por ejemplo una VPN (100.64.0.0/10).
+	LocalNetworks []string `yaml:"local_networks"`
+}
+
+// DLNA ajusta el servidor UPnP/DLNA (§13.2). Se activa con discovery.dlna_enabled.
+type DLNA struct {
+	// Mode decide cómo se ofrece cada archivo a los renderers: auto entrega el
+	// original si un perfil DLNA genérico lo admite y, si no, lo recodifica a
+	// MPEG-TS; direct nunca recodifica; transcode siempre lo hace.
+	Mode string `yaml:"mode"`
+	// BurnSubtitles graba en la imagen el subtítulo preferido al recodificar
+	// (auto) o nunca (off): un renderer no elige pistas.
+	BurnSubtitles string `yaml:"burn_subtitles"`
+	// IdleTimeoutSeconds expira la sesión DLNA sin peticiones HTTP.
+	IdleTimeoutSeconds int `yaml:"idle_timeout_seconds"`
 }
 
 // Default devuelve la configuración base. HTTPS queda desactivado hasta que
@@ -164,6 +186,7 @@ func Default() *Config {
 		},
 		Sessions:  Sessions{HeartbeatTimeoutSeconds: 90, ProgressPersistIntervalSeconds: 30, CompletedThresholdPercent: 90},
 		Discovery: Discovery{MDNSEnabled: true},
+		DLNA:      DLNA{Mode: "auto", BurnSubtitles: "auto", IdleTimeoutSeconds: 120},
 	}
 }
 
@@ -285,7 +308,7 @@ func (c *Config) resolvePaths(configPath string) error {
 	}
 	for _, p := range []*string{
 		&c.Database.Path, &c.Paths.Metadata, &c.Paths.Images, &c.Paths.Cache,
-		&c.Paths.Transcodes, &c.Paths.Logs, &c.Paths.Backups,
+		&c.Paths.Transcodes, &c.Paths.Logs, &c.Paths.Backups, &c.Server.TLSCertFile, &c.Server.TLSKeyFile,
 	} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(base, *p)
@@ -334,7 +357,14 @@ func (c *Config) Validate() error {
 		fail("server.http_port y server.https_port no pueden coincidir")
 	}
 	if c.Server.HTTPSEnabled {
-		fail("server.https_enabled aún no está disponible: el certificado propio llega en la Fase 11")
+		switch {
+		case c.Server.TLSCertFile == "" || c.Server.TLSKeyFile == "":
+			fail("server.https_enabled necesita server.tls_cert_file y server.tls_key_file: el certificado propio generado llega en la Fase 11")
+		default:
+			if _, err := tls.LoadX509KeyPair(c.Server.TLSCertFile, c.Server.TLSKeyFile); err != nil {
+				fail("el certificado TLS no se pudo cargar: %v", err)
+			}
+		}
 	}
 	for _, p := range c.Server.TrustedProxies {
 		if !validProxy(p) {
@@ -412,6 +442,33 @@ func (c *Config) Validate() error {
 	if (c.Remote.DirectEnabled || c.Remote.RelayEnabled || c.Remote.AdminEnabled) && !c.Remote.Enabled {
 		fail("remote.enabled debe estar activo para usar remote.direct_enabled, relay_enabled o admin_enabled")
 	}
+	if c.Remote.RelayEnabled {
+		fail("remote.relay_enabled aún no está disponible: el relay solo se construye si hay demanda (§14.3)")
+	}
+	if c.Remote.AdminEnabled && !c.Remote.DirectEnabled {
+		fail("remote.admin_enabled necesita remote.direct_enabled")
+	}
+	if c.Remote.DirectEnabled && !c.Server.HTTPSEnabled && len(c.Server.TrustedProxies) == 0 {
+		// Sin TLS propio ni un proxy que lo ponga, las contraseñas viajarían en claro por Internet.
+		fail("remote.direct_enabled exige HTTPS: activa server.https_enabled con un certificado o declara el reverse proxy en server.trusted_proxies")
+	}
+	if c.Remote.PublicURL != "" && !validPublicURL(c.Remote.PublicURL) {
+		fail("remote.public_url debe ser una dirección https sin ruta, como https://media.example.com: %q", c.Remote.PublicURL)
+	}
+	for _, n := range c.Remote.LocalNetworks {
+		if _, err := netip.ParsePrefix(n); err != nil {
+			fail("remote.local_networks contiene un rango CIDR inválido: %q", n)
+		}
+	}
+	if !slices.Contains([]string{"auto", "direct", "transcode"}, c.DLNA.Mode) {
+		fail("dlna.mode debe ser auto, direct o transcode: %q", c.DLNA.Mode)
+	}
+	if !slices.Contains([]string{"auto", "off"}, c.DLNA.BurnSubtitles) {
+		fail("dlna.burn_subtitles debe ser auto u off: %q", c.DLNA.BurnSubtitles)
+	}
+	if c.DLNA.IdleTimeoutSeconds < 10 {
+		fail("dlna.idle_timeout_seconds debe ser al menos 10: %d", c.DLNA.IdleTimeoutSeconds)
+	}
 
 	return errors.Join(errs...)
 }
@@ -424,6 +481,16 @@ func validOrigin(s string) bool {
 		return false
 	}
 	return u.Scheme+"://"+u.Host == s
+}
+
+// validPublicURL exige https, un host y nada más: ni ruta, ni consulta, ni
+// credenciales.
+func validPublicURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+		return false
+	}
+	return u.Path == "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func validProxy(s string) bool {

@@ -56,8 +56,24 @@ guardar los datos y ningún servicio externo obligatorio.
   arranque, bibliotecas, usuarios, metadatos, búsqueda y un reproductor (Direct
   Play y HLS con hls.js) con selectores de audio y subtítulos.
 
-**Aún no está:** clientes nativos para móvil y televisor, DLNA, descubrimiento en
-la red local, acceso remoto, TLS e instaladores. El HLS se ha verificado en
+- **DLNA.** Apagado por defecto y por biblioteca (`discovery.dlna_enabled` y un
+  interruptor en cada biblioteca del panel, con aviso: los televisores no usan
+  contraseña, así que cualquier equipo de la red local ve lo que publiques).
+  Descubrimiento SSDP, un MediaServer UPnP con ContentDirectory y
+  ConnectionManager, el archivo original con `Range` o MPEG-TS (copiando lo que se
+  pueda, con salto por tiempo y subtítulos grabados) cuando el televisor no lo
+  reproduce. Solo responde a la red local.
+- **Acceso remoto.** Apagado por defecto: el servidor solo responde a la red local.
+  `remote.direct_enabled` acepta conexiones de fuera con tu propio certificado
+  (`server.https_enabled`) o tras un reverse proxy (`server.trusted_proxies`); el
+  panel de administración sigue cerrado para ellas salvo `remote.admin_enabled`. Se
+  aplica el límite de bitrate remoto de cada usuario, y el panel comprueba la
+  conectividad desde fuera de la red local.
+
+**Aún no está:** clientes nativos para móvil y televisor, descubrimiento mDNS de
+MediaNode, el certificado generado para la LAN, Remote Relay e instaladores.
+**DLNA no se ha probado con un televisor ni un reproductor reales**: ver
+[`docs/dlna-renderers.md`](docs/dlna-renderers.md). El HLS se ha verificado en
 Chromium con hls.js; los reproductores de Safari, iOS y Android no se han
 probado, y solo se ha probado la codificación por software (libx264): los
 codificadores por hardware se detectan pero no están verificados. Grabar

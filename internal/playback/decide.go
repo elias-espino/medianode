@@ -136,9 +136,18 @@ func decide(in Input, allowEmbedded bool) Decision {
 			d.VideoAction = Recode
 			reason(code, "limits")
 		}
-		if code := videoCompatible(*in.Video, c); code != "" {
+		code := videoCompatible(*in.Video, c)
+		if code != "" {
 			d.VideoAction = Recode
 			reason(code, "video")
+		}
+		// El HDR que el cliente no muestra necesita tone mapping aunque otro motivo
+		// (el códec, la profundidad de bits) ya obligue a recodificar: videoCompatible
+		// solo devuelve el primero, y sin este aviso un HEVC HDR para un cliente sin
+		// HEVC se recodificaría sin convertir el color y saldría lavado.
+		if code != ReasonHDR && hdrUnsupported(*in.Video, c) {
+			d.VideoAction = Recode
+			reason(ReasonHDR, "video")
 		}
 	}
 	if in.Audio != nil {
@@ -255,10 +264,15 @@ func videoCompatible(v Video, c protocol.ClientProfile) string {
 		return ReasonVideoCodec
 	case v.BitDepth != nil && *v.BitDepth > int64(c.MaxBitDepth):
 		return ReasonBitDepth
-	case v.HDR != nil && !protocol.Has(c.HDR, protocol.HDRName(*v.HDR)):
+	case hdrUnsupported(v, c):
 		return ReasonHDR
 	}
 	return ""
+}
+
+// hdrUnsupported indica que el vídeo es HDR y el cliente no declara ese formato.
+func hdrUnsupported(v Video, c protocol.ClientProfile) bool {
+	return v.HDR != nil && !protocol.Has(c.HDR, protocol.HDRName(*v.HDR))
 }
 
 func audioCompatible(a Audio, c protocol.ClientProfile) string {

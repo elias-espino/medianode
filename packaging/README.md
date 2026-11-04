@@ -62,6 +62,38 @@ El servicio corre sin privilegios, con el sistema de archivos en solo lectura sa
 `/var/lib/medianode` y `/var/log/medianode`. Si tus bibliotecas pertenecen a otro
 usuario, añade `medianode` a su grupo (`sudo usermod -aG <grupo> medianode`).
 
+## Red: puertos, DLNA y acceso desde Internet
+
+Por defecto el servidor solo responde a la red local. Qué abrir en el firewall:
+
+| Para | Puerto | Hacia |
+|------|--------|-------|
+| Panel y clientes en la red local | TCP 8420 (`server.http_port`) | Solo la red local |
+| DLNA (descubrimiento) | UDP 1900, multidifusión `239.255.255.250` | Solo la red local |
+| HTTPS propio (`server.https_enabled`) | TCP 8421 (`server.https_port`) | Lo que decidas |
+
+- **DLNA** (`discovery.dlna_enabled: true`, y *Publicar por DLNA* en cada biblioteca).
+  Cualquier equipo de la red local ve lo publicado, sin contraseña. En Docker, el
+  descubrimiento necesita `network_mode: host` (solo Linux); en Docker Desktop, el
+  servidor se alcanza escribiendo su dirección en el televisor. Nunca abras el
+  UDP 1900 a Internet.
+- **Acceso desde Internet** (`remote.enabled` y `remote.direct_enabled`): publica
+  **solo** el puerto de HTTPS o el del reverse proxy. Exige un certificado propio
+  (`server.tls_cert_file` y `tls_key_file`, que se recargan solos al renovarlos) o
+  un proxy declarado en `server.trusted_proxies`; un reverse proxy debe enviar
+  `X-Forwarded-For` con la dirección del cliente. Pon `remote.public_url` para
+  que el panel (*Administración → Red*) compruebe el certificado, el DNS y, con una
+  prueba abierta desde los datos del móvil, que se llega de verdad. El panel de
+  administración sigue cerrado desde fuera salvo `remote.admin_enabled`.
+- **Si ya usabas un reverse proxy** (Traefik, nginx, Caddy) sin declararlo, desde esta
+  versión el servidor **rechaza con `403 REMOTE_ACCESS_DISABLED`** lo que llega con
+  `X-Forwarded-For` desde un origen que no está en `server.trusted_proxies`: sin eso
+  no puede saber si el cliente de verdad está en tu red local (§14.4). El registro
+  lo dice (`conexión remota rechazada`). Declara la dirección del proxy en
+  `trusted_proxies` y activa `remote.enabled` y `remote.direct_enabled`.
+- Una VPN (Tailscale, WireGuard) no es «red local» para el servidor: añade su rango en
+  `remote.local_networks` si quieres tratarla como tal.
+
 ## Generar los binarios
 
 ```bash

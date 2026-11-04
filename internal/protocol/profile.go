@@ -155,6 +155,17 @@ func PresetFor(platform string) ClientProfile {
 			SubtitleDelivery: []string{DeliveryHLS}, Protocols: []string{ProtocolHTTP, ProtocolHLS},
 			HDR: []string{"hdr10", "hlg", "dolby_vision"}, MaxBitDepth: 10, MaxAudioChannels: 6,
 		}
+	case "dlna":
+		// Un renderer DLNA genérico (§13.2): no envía perfil y no se puede
+		// preguntar, así que solo se declara lo que casi cualquier televisor lee por
+		// HTTP: H.264 y MPEG-2 en MP4 o MPEG-TS, con audio estéreo AAC, MP3 o AC-3.
+		// Los subtítulos no se pueden elegir desde el mando: o van grabados en la
+		// imagen o no van.
+		return ClientProfile{
+			Containers: []string{"mp4", "ts"}, VideoCodecs: []string{"h264", "mpeg2"},
+			AudioCodecs: []string{"aac", "mp3", "ac3"}, SubtitleFormats: []string{}, SubtitleDelivery: []string{},
+			Protocols: []string{ProtocolHTTP}, MaxResolution: "1920x1080", MaxBitDepth: 8, MaxAudioChannels: 2,
+		}
 	case "tizen", "webos":
 		return ClientProfile{
 			Containers: []string{"mp4", "mkv", "ts"}, VideoCodecs: []string{"h264", "hevc"},

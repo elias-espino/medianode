@@ -65,8 +65,8 @@ FFmpeg que instalas.
   uso (cada instalación usa su propia clave). El panel muestra el aviso que
   exigen cuando el proveedor está configurado.
 - **hls.js** (Apache-2.0) y **React** (MIT) van dentro del panel compilado.
-- **Dependencias de Go:** las 26 que se compilan en el servidor (comprobado con
-  `go list -deps` para Windows, Linux y macOS) son 12 BSD, 11 MIT, 2 Apache-2.0 y
+- **Dependencias de Go:** las 27 que se compilan en el servidor (comprobado con
+  `go list -deps` para Windows, Linux y macOS) son 13 BSD, 11 MIT, 2 Apache-2.0 y
   1 ISC: ninguna con copyleft. En el grafo de módulos hay una MPL-2.0
   (`hashicorp/golang-lru`, copyleft débil por archivo) que solo entra por
   dependencias de pruebas de `modernc.org` y no se compila en el binario. Vuelve a

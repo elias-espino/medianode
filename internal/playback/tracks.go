@@ -37,6 +37,8 @@ type Preferences struct {
 	AudioLanguage    string
 	SubtitleLanguage string
 	SubtitleMode     media.SubtitleMode
+	// MaxBitrateRemote limita el bitrate fuera de la red local; nil no limita.
+	MaxBitrateRemote *int64
 }
 
 // selectTracks elige vídeo, audio y subtítulo de un archivo. Una pista pedida

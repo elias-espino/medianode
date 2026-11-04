@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api, qs } from "../api";
-import type { AdminCheck, AdminLogEntry, AdminNetwork, AdminStorage, AdminSystem, AdminVolume } from "../api/types";
-import { Alert, Bar, Empty, Field, Spinner, formatBytes, formatDate, useLoad } from "../ui";
+import type { AdminCheck, AdminLogEntry, AdminNetwork, AdminStorage, AdminSystem, AdminVolume, RemoteProbe, RemoteReport } from "../api/types";
+import { Alert, Bar, Empty, Field, Spinner, errorText, formatBytes, formatDate, useLoad } from "../ui";
 
 // Pestañas de administración que muestran el equipo y su configuración.
 
@@ -117,7 +117,7 @@ export function Network() {
           </tr>
           <tr>
             <td>HTTPS</td>
-            <td>{n.https_enabled ? "Activado (todavía no implementado)" : "Desactivado"}</td>
+            <td>{n.tls_enabled ? "Activado, con el certificado propio" : "Desactivado: el servidor solo habla HTTP, sin cifrar"}</td>
           </tr>
           <tr>
             <td>Proxies de confianza</td>
@@ -128,6 +128,14 @@ export function Network() {
             <td className="mono">{n.cors_origins.join(", ") || "solo el propio servidor"}</td>
           </tr>
           <tr>
+            <td>DLNA</td>
+            <td>{n.dlna_enabled ? "Activado: solo responde a la red local" : "Desactivado"}</td>
+          </tr>
+          <tr>
+            <td>Redes extra tratadas como locales</td>
+            <td className="mono">{n.local_networks.join(", ") || "ninguna"}</td>
+          </tr>
+          <tr>
             <td>Conexiones activas</td>
             <td>
               {n.connections_local} de la red local · {n.connections_remote} remotas
@@ -135,6 +143,7 @@ export function Network() {
           </tr>
         </tbody>
       </table>
+      <RemoteAccess enabled={n.remote_enabled} adminOpen={n.remote_admin_enabled} publicURL={n.public_url} />
     </>
   );
 }
@@ -355,6 +364,111 @@ export function Check() {
             </li>
           ))}
         </ul>
+      )}
+    </>
+  );
+}
+
+const probeHelp: Record<RemoteProbe["state"], string> = {
+  none: "Genera una dirección de un solo uso y ábrela desde otra red, por ejemplo con los datos del móvil con el wifi apagado.",
+  pending: "Abre la dirección desde otra red: desde esta no demuestra nada. Vale 10 minutos y una sola vez.",
+  local_only: "Se abrió desde la red local, y eso no prueba nada. Ábrela desde otra red.",
+  reachable: "El servidor es alcanzable desde fuera de la red local.",
+  expired: "La prueba caducó sin que nadie la abriera desde fuera. Genera otra.",
+};
+
+// RemoteAccess muestra las comprobaciones de conectividad del acceso remoto
+// (§14.2) y lanza la prueba desde fuera de la red local.
+function RemoteAccess({ enabled, adminOpen, publicURL }: { enabled: boolean; adminOpen: boolean; publicURL: string }) {
+  const report = useLoad(() => api.get<RemoteReport>("/admin/remote"), []);
+  const [probe, setProbe] = useState<RemoteProbe | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const state = probe?.state ?? report.data?.probe.state ?? "none";
+
+  // Mientras la prueba espera, se consulta el informe: quien abre la dirección
+  // lo hace desde otro aparato.
+  useEffect(() => {
+    if (state !== "pending" && state !== "local_only") return;
+    const t = window.setInterval(() => {
+      void api
+        .get<RemoteReport>("/admin/remote")
+        .then((r) => setProbe(r.probe))
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(t);
+  }, [state]);
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setProbe(await api.post<RemoteProbe>("/admin/remote/probe"));
+      report.reload();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const current = probe ?? report.data?.probe;
+  return (
+    <>
+      <h2 className="section-title">Acceso desde Internet</h2>
+      {!enabled && (
+        <Alert kind="info">
+          Desactivado: el servidor solo responde a la red local. Se activa con remote.enabled y remote.direct_enabled, y exige HTTPS propio
+          (server.https_enabled) o un reverse proxy declarado en server.trusted_proxies.
+        </Alert>
+      )}
+      {enabled && adminOpen && (
+        <Alert>La administración está abierta a Internet (remote.admin_enabled). Desactívala salvo que la necesites.</Alert>
+      )}
+      {report.error && <Alert>{report.error}</Alert>}
+      {report.loading && !report.data && <Spinner label="Comprobando la conectividad…" />}
+      {report.data && (
+        <ul className="checks">
+          {report.data.checks.map((c) => (
+            <li key={c.id} className={`check check-${c.status}`}>
+              <span className={`check-status status-${c.status}`}>{checkLabels[c.status]}</span>
+              <div>
+                <strong>{c.name}</strong>
+                <p className="muted">{c.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {enabled && (
+        <div className="card">
+          <div className="row-between">
+            <div>
+              <strong>Prueba desde fuera de la red local</strong>
+              <p className="muted">{probeHelp[state]}</p>
+              {current?.state === "reachable" && current.from && (
+                <p className="muted small">
+                  Llegó una petición desde <span className="mono">{current.from}</span>.
+                </p>
+              )}
+            </div>
+            <div className="row">
+              <button className="btn" onClick={() => report.reload()} disabled={report.loading}>
+                Volver a comprobar
+              </button>
+              <button className="btn btn-primary" onClick={() => void start()} disabled={busy || !publicURL}>
+                Generar prueba
+              </button>
+            </div>
+          </div>
+          {!publicURL && <p className="muted small">Falta remote.public_url: sin la dirección pública no hay a dónde llamar.</p>}
+          {error && <Alert>{error}</Alert>}
+          {current?.url && (state === "pending" || state === "local_only") && (
+            <p>
+              <input className="mono" readOnly value={current.url} onFocus={(e) => e.currentTarget.select()} aria-label="Dirección de la prueba" />
+            </p>
+          )}
+        </div>
       )}
     </>
   );

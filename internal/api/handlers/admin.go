@@ -13,6 +13,7 @@ import (
 	"medianode/internal/api/dto"
 	"medianode/internal/core"
 	"medianode/internal/database"
+	"medianode/internal/remote"
 	"medianode/internal/sessions"
 	"medianode/internal/transcoding"
 )
@@ -22,6 +23,7 @@ type Admin struct {
 	Transcoder *transcoding.Manager
 	Sessions   *sessions.Manager
 	Service    *admin.Service
+	Remote     *remote.Remote
 	Log        zerolog.Logger
 }
 
@@ -44,6 +46,36 @@ func (h *Admin) ActiveSessions(w http.ResponseWriter, r *http.Request) {
 // Network devuelve la configuración de red y las direcciones del servidor.
 func (h *Admin) Network(w http.ResponseWriter, _ *http.Request) {
 	api.WriteJSON(w, http.StatusOK, h.Service.Network())
+}
+
+// RemoteReport devuelve las comprobaciones de conectividad del acceso remoto y el
+// estado de la prueba desde fuera de la red local.
+func (h *Admin) RemoteReport(w http.ResponseWriter, r *http.Request) {
+	if h.Remote == nil {
+		api.WriteError(w, r, core.ErrNotFound())
+		return
+	}
+	rep, err := h.Remote.CheckReachability(r.Context())
+	if err != nil {
+		api.WriteFailure(w, r, h.Log, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, rep)
+}
+
+// StartRemoteProbe genera la URL de un solo uso con la que se comprueba, desde
+// otra red, que el servidor es alcanzable.
+func (h *Admin) StartRemoteProbe(w http.ResponseWriter, r *http.Request) {
+	if h.Remote == nil {
+		api.WriteError(w, r, core.ErrNotFound())
+		return
+	}
+	p, err := h.Remote.StartProbe()
+	if err != nil {
+		api.WriteError(w, r, core.ErrValidation(err.Error()))
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, p)
 }
 
 // Storage devuelve el uso de disco.
