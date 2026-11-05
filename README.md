@@ -18,6 +18,15 @@ and a report is the most useful contribution: see
 [Status and where help is wanted](#status-and-where-help-is-wanted) and
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+## Screenshots
+
+Demo server with test clips (placeholder posters, no metadata provider). The panel is
+in Spanish. More in [`docs/screenshots/`](docs/screenshots).
+
+| Library | Player | Active session |
+| --- | --- | --- |
+| ![Library](docs/screenshots/04-biblioteca-peliculas.png) | ![Player](docs/screenshots/08-reproductor.png) | ![Session](docs/screenshots/09-sesion-activa.png) |
+
 ## What works today
 
 - **Libraries.** Movie and TV libraries with one or more folders. A scan reads
