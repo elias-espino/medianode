@@ -141,6 +141,7 @@ func (s *Server) subscribe(service string) http.HandlerFunc {
 		}
 		callbacks := parseCallbacks(cb, from)
 		if len(callbacks) == 0 {
+			s.log.Warn().Str("origen", from.String()).Str("callback", cb).Msg("DLNA: suscripción rechazada: el CALLBACK no es una URL http hacia el origen")
 			http.Error(w, "CALLBACK no válido: solo http hacia la dirección de quien suscribe", http.StatusPreconditionFailed)
 			return
 		}

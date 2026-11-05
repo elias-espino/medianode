@@ -110,7 +110,13 @@ func (c *checker) subscribe(root, host string) *eventSink {
 	req.Header.Set("CALLBACK", "<"+e.url+">")
 	req.Header.Set("NT", "upnp:event")
 	req.Header.Set("TIMEOUT", "Second-600")
-	resp, err := c.client.Do(req)
+	// La suscripción sale desde la dirección del receptor (se enlaza el socket a ella):
+	// es la única forma de que el servidor vea esa misma dirección como origen.
+	from := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+		DisableKeepAlives: true,
+		DialContext:       (&net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(host)}}).DialContext,
+	}}
+	resp, err := from.Do(req)
 	sid, status := "", 0
 	if err == nil {
 		sid, status = resp.Header.Get("SID"), resp.StatusCode
@@ -130,7 +136,7 @@ func (c *checker) subscribe(root, host string) *eventSink {
 	bad, _ := http.NewRequest("SUBSCRIBE", root+"/dlna/cds/event", nil)
 	bad.Header.Set("CALLBACK", "<http://169.254.169.254/latest>")
 	bad.Header.Set("NT", "upnp:event")
-	if r2, err := c.client.Do(bad); err == nil {
+	if r2, err := from.Do(bad); err == nil {
 		_ = r2.Body.Close()
 		c.check("D26", "un CALLBACK hacia otra dirección es un 412", r2.StatusCode == http.StatusPreconditionFailed, r2.StatusCode)
 	}
