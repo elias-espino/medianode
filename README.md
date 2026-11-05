@@ -12,6 +12,12 @@ external services required.
 > Expect rough edges, breaking changes and missing features (see
 > [What works today](#what-works-today)). Do not expose it to the Internet.
 
+**Looking for help.** It has only been tried on Windows and Docker, and DLNA has never
+run on a real TV. If you have a smart TV, a Mac, a Linux box or a GPU, a quick test
+and a report is the most useful contribution: see
+[Status and where help is wanted](#status-and-where-help-is-wanted) and
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## What works today
 
 - **Libraries.** Movie and TV libraries with one or more folders. A scan reads

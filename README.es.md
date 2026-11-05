@@ -12,6 +12,12 @@ guardar los datos y ningún servicio externo obligatorio.
 > faltan (mira [Qué funciona hoy](#qué-funciona-hoy)). No lo expongas a
 > Internet.
 
+**Se busca ayuda.** Solo se ha probado en Windows y Docker, y DLNA nunca ha corrido en
+un televisor real. Si tienes un televisor inteligente, un Mac, un equipo Linux o una
+GPU, una prueba rápida y un informe es la contribución más útil: mira
+[Estado y dónde se agradece ayuda](#estado-y-dónde-se-agradece-ayuda) y
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Qué funciona hoy
 
 - **Bibliotecas.** De películas y de series, con una o varias carpetas. Un
