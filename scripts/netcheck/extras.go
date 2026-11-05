@@ -75,17 +75,13 @@ func (e *eventSink) seqs() []int {
 // subscribe abre un receptor y se suscribe a ContentDirectory. host es la
 // dirección por la que se llegó al servidor: la misma será la del callback, que
 // es lo único que el servidor acepta.
-func (c *checker) subscribe(root, host string) *eventSink {
+func (c *checker) subscribe(root, seen, host string) *eventSink {
 	e := &eventSink{}
-	// La dirección que verá el servidor es la de origen de la conexión, que no siempre
-	// es la de destino (con una interfaz sin portadora, por ejemplo): se mide.
-	if u, err := url.Parse(root); err == nil {
-		if conn, err := net.DialTimeout("tcp", u.Host, 3*time.Second); err == nil {
-			if ta, ok := conn.LocalAddr().(*net.TCPAddr); ok {
-				host = ta.IP.String()
-			}
-			_ = conn.Close()
-		}
+	// El servidor solo acepta un callback hacia la dirección de la que ve llegar la
+	// suscripción, y esa no siempre es la de destino (Linux con docker0, por ejemplo):
+	// se usa la que el propio servidor apuntó en la sesión DLNA.
+	if seen != "" {
+		host = seen
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
@@ -110,13 +106,7 @@ func (c *checker) subscribe(root, host string) *eventSink {
 	req.Header.Set("CALLBACK", "<"+e.url+">")
 	req.Header.Set("NT", "upnp:event")
 	req.Header.Set("TIMEOUT", "Second-600")
-	// La suscripción sale desde la dirección del receptor (se enlaza el socket a ella):
-	// es la única forma de que el servidor vea esa misma dirección como origen.
-	from := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
-		DisableKeepAlives: true,
-		DialContext:       (&net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(host)}}).DialContext,
-	}}
-	resp, err := from.Do(req)
+	resp, err := c.client.Do(req)
 	sid, status := "", 0
 	if err == nil {
 		sid, status = resp.Header.Get("SID"), resp.StatusCode
@@ -136,7 +126,7 @@ func (c *checker) subscribe(root, host string) *eventSink {
 	bad, _ := http.NewRequest("SUBSCRIBE", root+"/dlna/cds/event", nil)
 	bad.Header.Set("CALLBACK", "<http://169.254.169.254/latest>")
 	bad.Header.Set("NT", "upnp:event")
-	if r2, err := from.Do(bad); err == nil {
+	if r2, err := c.client.Do(bad); err == nil {
 		_ = r2.Body.Close()
 		c.check("D26", "un CALLBACK hacia otra dirección es un 412", r2.StatusCode == http.StatusPreconditionFailed, r2.StatusCode)
 	}

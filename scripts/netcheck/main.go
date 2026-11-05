@@ -546,16 +546,19 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 	_, _, b = c.do("GET", "/api/v1/admin/sessions", nil, token, via(lanIP))
 	var sessions []obj
 	_ = json.Unmarshal(b, &sessions)
-	dl := 0
+	dl, seen := 0, ""
 	for _, s := range sessions {
 		if s["client_kind"] == "dlna" && s["user"] == "" {
 			dl++
+			if ip, _ := s["client_ip"].(string); seen == "" {
+				seen = ip // La dirección de origen tal como la vio el servidor.
+			}
 		}
 	}
 	c.check("D13", "las sesiones DLNA figuran en el panel, sin usuario", dl >= 1, dl)
 
 	c.searchAndSubtitles(root, browse, soap, get, lib, unesc)
-	events := c.subscribe(root, lu.Hostname())
+	events := c.subscribe(root, seen, lu.Hostname())
 	defer events.close()
 
 	// Fuera de la red local, DLNA no existe.
