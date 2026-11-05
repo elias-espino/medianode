@@ -77,6 +77,16 @@ func (e *eventSink) seqs() []int {
 // es lo único que el servidor acepta.
 func (c *checker) subscribe(root, host string) *eventSink {
 	e := &eventSink{}
+	// La dirección que verá el servidor es la de origen de la conexión, que no siempre
+	// es la de destino (con una interfaz sin portadora, por ejemplo): se mide.
+	if u, err := url.Parse(root); err == nil {
+		if conn, err := net.DialTimeout("tcp", u.Host, 3*time.Second); err == nil {
+			if ta, ok := conn.LocalAddr().(*net.TCPAddr); ok {
+				host = ta.IP.String()
+			}
+			_ = conn.Close()
+		}
+	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
 		c.skip("D24", "eventos UPnP", "no se pudo abrir un receptor en "+host+": "+err.Error())
@@ -101,12 +111,12 @@ func (c *checker) subscribe(root, host string) *eventSink {
 	req.Header.Set("NT", "upnp:event")
 	req.Header.Set("TIMEOUT", "Second-600")
 	resp, err := c.client.Do(req)
-	sid := ""
+	sid, status := "", 0
 	if err == nil {
-		sid = resp.Header.Get("SID")
+		sid, status = resp.Header.Get("SID"), resp.StatusCode
 		_ = resp.Body.Close()
 	}
-	c.check("D24", "SUBSCRIBE a ContentDirectory devuelve un SID", err == nil && resp.StatusCode == 200 && strings.HasPrefix(sid, "uuid:"), err)
+	c.check("D24", "SUBSCRIBE a ContentDirectory devuelve un SID", err == nil && status == 200 && strings.HasPrefix(sid, "uuid:"), status, err, " callback "+e.url)
 	ok := e.wait(1, 5*time.Second)
 	e.mu.Lock()
 	first := ""

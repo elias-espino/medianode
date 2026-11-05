@@ -147,7 +147,7 @@ jobs:
             -tls-ca "$RUNNER_TEMP/net/tls/cert.pem" -setup-code "$code" \
             -media-dir "$RUNNER_TEMP/net/media" -fixtures testdata/fixtures
       - name: Registro del servidor
-        if: failure()
+        if: always()
         run: cat "$RUNNER_TEMP/net/server.log"
 
   lint:
