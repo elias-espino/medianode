@@ -414,24 +414,30 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 	}
 
 	// Descubrimiento por SSDP, con un socket UDP de verdad.
-	location := ""
+	location, lanFallback := "", ""
 	if noMulticast {
 		c.skip("D2", "SSDP por multidifusión", "-no-multicast")
 	} else {
-		resps := ssdpSearch(3 * time.Second)
+		resps, tried := ssdpSearch(3 * time.Second)
+		lanFallback = firstOf(tried)
 		for _, r := range resps {
 			if m := reLocation.FindStringSubmatch(r); m != nil && strings.Contains(m[1], ":"+portOf(c.base)+"/dlna/device.xml") {
 				location = m[1]
 			}
 		}
 		if len(resps) == 0 {
-			c.skip("D2", "SSDP por multidifusión", "ninguna respuesta (¿sin interfaz con multidifusión?)")
+			c.skip("D2", "SSDP por multidifusión", "ninguna respuesta; se buscó desde "+strings.Join(tried, ", "))
 		} else {
 			c.check("D2", "M-SEARCH por multidifusión descubre el servidor", location != "", fmt.Sprintf("%d respuestas; %s", len(resps), location))
 		}
 	}
 	if location == "" {
+		// Sin SSDP, por la dirección de la red local: por el bucle local, el servidor
+		// (que aquí confía en 127.0.0.1 como proxy) lo trataría como remoto.
 		location = c.base + "/dlna/device.xml"
+		if lanFallback != "" {
+			location = "http://" + net.JoinHostPort(lanFallback, portOf(c.base)) + "/dlna/device.xml"
+		}
 	}
 	// El resto va por la dirección que anunció el servidor.
 	lu, err := url.Parse(location)
@@ -585,10 +591,9 @@ func portOf(base string) string {
 
 // ssdpSearch hace un M-SEARCH por multidifusión por cada interfaz IPv4 con
 // multidifusión y devuelve las respuestas recibidas.
-func ssdpSearch(wait time.Duration) []string {
+func ssdpSearch(wait time.Duration) (out []string, tried []string) {
 	group := &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900}
 	msg := "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:MediaServer:1\r\n\r\n"
-	var out []string
 	ifs, _ := net.Interfaces()
 	for _, ifc := range ifs {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagMulticast == 0 || ifc.Flags&net.FlagLoopback != 0 {
@@ -600,6 +605,7 @@ func ssdpSearch(wait time.Duration) []string {
 			if !ok || ipn.IP.To4() == nil || ipn.IP.IsLinkLocalUnicast() {
 				continue
 			}
+			tried = append(tried, ipn.IP.String())
 			conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ipn.IP})
 			if err != nil {
 				continue
@@ -619,5 +625,13 @@ func ssdpSearch(wait time.Duration) []string {
 			_ = conn.Close()
 		}
 	}
-	return out
+	return out, tried
+}
+
+// firstOf devuelve el primer elemento, o vacío.
+func firstOf(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
 }

@@ -299,6 +299,11 @@ func (s *ssdp) refresh() bool {
 	s.current = now
 	s.mu.Unlock()
 	if changed {
+		names := make([]string, 0, len(now))
+		for _, via := range now {
+			names = append(names, via.Name+"="+via.IP.String())
+		}
+		s.log.Info().Strs("interfaces", names).Msg("DLNA: se anuncia por estas interfaces")
 		for _, via := range now {
 			if err := s.io.join(via); err != nil {
 				s.log.Debug().Err(err).Str("interfaz", via.Name).Msg("no se pudo unir al grupo SSDP")
