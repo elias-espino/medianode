@@ -114,7 +114,9 @@ Lista honesta:
       (Windows Media Player, Xbox) y `PrepareForConnection`.
 - [ ] Perfiles familiares, restricciones por edad en el catálogo, recomendaciones.
 
-Las decisiones detrás del código están en [`docs/adr/`](docs/adr).
+Para ayudar, mira [`CONTRIBUTING.md`](CONTRIBUTING.md): explica cómo probar DLNA en tu
+televisor y trae plantillas de issue para los resultados. Las decisiones detrás del
+código están en [`docs/adr/`](docs/adr).
 
 ## Instalación
 

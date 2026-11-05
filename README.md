@@ -106,7 +106,9 @@ Linux and macOS), but a lot is untested on real hardware. Honest list:
       Xbox) and `PrepareForConnection`.
 - [ ] Family profiles, age restrictions in the catalog, recommendations.
 
-The decisions behind the code are in [`docs/adr/`](docs/adr).
+To help, see [`CONTRIBUTING.md`](CONTRIBUTING.md): it explains how to test DLNA on your
+TV and has issue templates for the results. The decisions behind the code are in
+[`docs/adr/`](docs/adr).
 
 ## Install
 

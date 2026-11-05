@@ -1,0 +1,60 @@
+name: DLNA test result / Resultado de prueba DLNA
+description: Tell us how a real TV or player behaves with MediaNode. Working or not, both help.
+title: "DLNA: <brand model>"
+labels: ["dlna", "testing"]
+body:
+  - type: input
+    id: device
+    attributes:
+      label: Brand, model and software version / Marca, modelo y versión
+      placeholder: "Samsung UE55TU8000, firmware 1450"
+    validations:
+      required: true
+  - type: dropdown
+    id: discovers
+    attributes:
+      label: Does it list MediaNode as a server? / ¿Lo muestra como servidor?
+      options: ["Yes", "No", "Only by typing the address"]
+    validations:
+      required: true
+  - type: dropdown
+    id: browses
+    attributes:
+      label: Can you browse libraries and items? / ¿Navega bibliotecas y elementos?
+      options: ["Yes", "No", "Partially"]
+    validations:
+      required: true
+  - type: textarea
+    id: playback
+    attributes:
+      label: What played, and how? / Qué se reprodujo
+      description: One line per file type (MP4 H.264+AAC, MKV, HEVC, with .srt...) with what happened and the mode shown in Administration > Sessions.
+    validations:
+      required: true
+  - type: dropdown
+    id: seeking
+    attributes:
+      label: Seeking / Saltos
+      options: ["Works", "Does not work", "Works only on direct files", "Not tried"]
+    validations:
+      required: true
+  - type: dropdown
+    id: subtitles
+    attributes:
+      label: External .srt subtitles / Subtítulos .srt externos
+      options: ["Shown", "Not shown", "Not tried"]
+  - type: input
+    id: version
+    attributes:
+      label: MediaNode version or commit / Versión o commit
+  - type: input
+    id: system
+    attributes:
+      label: Server system and FFmpeg version / Sistema del servidor y FFmpeg
+      placeholder: "Windows 10, FFmpeg 9.0.2 (gyan.dev)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log lines mentioning dlna / Líneas del registro con dlna
+      render: text
+      description: Please check there is nothing private before pasting.

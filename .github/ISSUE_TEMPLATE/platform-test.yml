@@ -1,0 +1,42 @@
+name: Platform test report / Prueba en otra plataforma
+description: macOS, Linux/systemd, Firefox, Safari, hardware encoders, PGS/VobSub, HDR, remote access...
+title: "Test: <what> on <where>"
+labels: ["testing"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: What did you test? / Qué probaste
+      options:
+        - macOS
+        - Linux with systemd
+        - Firefox
+        - Safari
+        - Hardware encoder (NVENC, QSV, AMF, VAAPI, VideoToolbox)
+        - Image subtitles (PGS, VobSub)
+        - HDR to SDR
+        - Remote access from outside the LAN
+        - Docker
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / Entorno
+      description: OS and version, CPU/GPU, FFmpeg version, browser version, how you installed MediaNode.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened? / Qué pasó
+      description: Steps, expected, actual. "It works" is a useful report too.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Registros
+      render: text
+      description: Please check there is nothing private before pasting.
