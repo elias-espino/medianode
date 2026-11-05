@@ -43,6 +43,13 @@ func TestRutasDelPanelDevuelvenIndex(t *testing.T) {
 		if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "default-src 'self'") {
 			t.Fatalf("%s: falta la CSP", path)
 		}
+		// hls.js necesita blob: para el vídeo (MediaSource) y su worker.
+		policy := rec.Header().Get("Content-Security-Policy")
+		for _, want := range []string{"media-src 'self' blob:", "worker-src 'self' blob:"} {
+			if !strings.Contains(policy, want) {
+				t.Fatalf("%s: la CSP no permite %q: %s", path, want, policy)
+			}
+		}
 	}
 }
 

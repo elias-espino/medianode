@@ -14,7 +14,10 @@ var dist embed.FS
 
 // csp limita el panel a su propio origen. Las carátulas de las coincidencias
 // llegan directamente de TMDB al elegir una en la identificación manual.
+// hls.js reproduce con MediaSource, que expone el vídeo como una URL blob:, y
+// lanza su worker desde otra; sin media-src y worker-src el navegador las bloquea.
 const csp = "default-src 'self'; img-src 'self' data: https://image.tmdb.org; " +
+	"media-src 'self' blob:; worker-src 'self' blob:; " +
 	"object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 // Handler sirve el panel, o devuelve nil si no se compiló (dist solo tiene
