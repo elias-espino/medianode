@@ -64,15 +64,49 @@ external services required.
   `remote.admin_enabled` says otherwise. A per-user remote bitrate limit applies,
   and the panel can test reachability from outside the LAN.
 
-**Not done yet:** native mobile and TV clients, mDNS discovery of MediaNode, the
-generated LAN certificate, Remote Relay and installers. **DLNA has not been tried
-on a real TV or player**: see [`docs/dlna-renderers.md`](docs/dlna-renderers.md). HLS has been verified in Chromium
-with hls.js; Safari, iOS and Android players are untested, and only software
-encoding (libx264) has been tried: hardware encoders are detected but
-unverified. Burning image subtitles (PGS, VobSub) is implemented but has not run
-on a real track. On the development machine (an old 4-core i5), software HDR
-tone mapping runs at about a third of real time, so it does not play smoothly.
-On macOS, FFmpeg may stay alive if the server is killed.
+## Status and where help is wanted
+
+MediaNode is **alpha**. It works end to end on Windows over a LAN (the 14 MVP
+criteria pass on a clean Windows binary and on Docker; CI is green on Windows,
+Linux and macOS), but a lot is untested on real hardware. Honest list:
+
+**Needs testing on real hardware (the most useful help)**
+
+- [ ] **DLNA on real TVs and players.** Only tested against our own control
+      point (`scripts/netcheck`). The compatibility matrix in
+      [`docs/dlna-renderers.md`](docs/dlna-renderers.md) is empty: results for
+      any Samsung, LG, Sony, Android TV, VLC, Kodi, etc. are very welcome.
+- [ ] **Remote access from outside the LAN** with a real domain, port forward or
+      reverse proxy (only simulated so far).
+- [ ] **macOS**: the SSDP multicast search got no answer on the CI runner; the
+      rest of DLNA works there. FFmpeg may also stay alive if the server is
+      killed.
+- [ ] **Linux with systemd**: the unit in `packaging/` has never run on a real
+      machine.
+- [ ] **Browsers**: Firefox and Safari (native HLS) are untested; Chrome and Edge
+      are verified.
+- [ ] **Hardware encoders** (NVENC, QSV, AMF, VAAPI, VideoToolbox): detected but
+      never run.
+- [ ] **Image subtitles** (PGS, VobSub) burned into the picture: implemented, never
+      run on a real track.
+- [ ] **HDR to SDR**: on the development machine (an old 4-core i5) with the
+      Windows FFmpeg build it runs at about a third of real time.
+
+**Not implemented yet**
+
+- [ ] Mobile apps (Android, iOS) and TV apps (Android TV, tvOS, Tizen, webOS):
+      phases 11 and 12 of [`plan_de_trabajo.md`](plan_de_trabajo.md).
+- [ ] mDNS discovery of MediaNode and the generated LAN certificate.
+- [ ] Installers (MSI, DEB, RPM, PKG), a Windows service, and signed releases;
+      the release workflow has never been run on a tag.
+- [ ] Backups and editable settings from the panel (settings are read-only).
+- [ ] Remote Relay (only if there is demand).
+- [ ] DLNA: `DLNA.ORG_PN` profiles (left out on purpose: a wrong one makes strict
+      TVs reject the item), `X_MS_MediaReceiverRegistrar` (Windows Media Player,
+      Xbox) and `PrepareForConnection`.
+- [ ] Family profiles, age restrictions in the catalog, recommendations.
+
+The decisions behind the code are in [`docs/adr/`](docs/adr).
 
 ## Install
 

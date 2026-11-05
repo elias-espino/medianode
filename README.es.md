@@ -70,17 +70,51 @@ guardar los datos y ningún servicio externo obligatorio.
   aplica el límite de bitrate remoto de cada usuario, y el panel comprueba la
   conectividad desde fuera de la red local.
 
-**Aún no está:** clientes nativos para móvil y televisor, descubrimiento mDNS de
-MediaNode, el certificado generado para la LAN, Remote Relay e instaladores.
-**DLNA no se ha probado con un televisor ni un reproductor reales**: ver
-[`docs/dlna-renderers.md`](docs/dlna-renderers.md). El HLS se ha verificado en
-Chromium con hls.js; los reproductores de Safari, iOS y Android no se han
-probado, y solo se ha probado la codificación por software (libx264): los
-codificadores por hardware se detectan pero no están verificados. Grabar
-subtítulos de imagen (PGS, VobSub) está implementado pero no se ha ejecutado con
-una pista real. En el equipo de desarrollo (un i5 antiguo de 4 núcleos), el tone
-mapping de HDR por software va a un tercio del tiempo real y no se reproduce con
-fluidez. En macOS, FFmpeg puede quedar vivo si el servidor muere de golpe.
+## Estado y dónde se agradece ayuda
+
+MediaNode está en **alfa**. Funciona de punta a punta en Windows por LAN (los 14
+criterios del MVP pasan en un binario de Windows limpio y en Docker; el CI está en
+verde en Windows, Linux y macOS), pero mucho no se ha probado con hardware real.
+Lista honesta:
+
+**Necesita pruebas con hardware real (la ayuda más útil)**
+
+- [ ] **DLNA en televisores y reproductores reales.** Solo se ha probado con un
+      control point propio (`scripts/netcheck`). La matriz de compatibilidad de
+      [`docs/dlna-renderers.md`](docs/dlna-renderers.md) está vacía: se agradecen
+      resultados de cualquier Samsung, LG, Sony, Android TV, VLC, Kodi, etc.
+- [ ] **Acceso remoto desde fuera de la LAN** con un dominio real, puerto
+      reenviado o reverse proxy (hasta ahora, solo simulado).
+- [ ] **macOS**: la búsqueda SSDP por multidifusión no obtuvo respuesta en la
+      máquina del CI; el resto de DLNA funciona allí. Además, FFmpeg puede quedar
+      vivo si el servidor muere de golpe.
+- [ ] **Linux con systemd**: la unidad de `packaging/` nunca se ha ejecutado en un
+      equipo real.
+- [ ] **Navegadores**: Firefox y Safari (HLS nativo) sin probar; Chrome y Edge,
+      verificados.
+- [ ] **Codificadores por hardware** (NVENC, QSV, AMF, VAAPI, VideoToolbox):
+      detectados, nunca ejecutados.
+- [ ] **Subtítulos de imagen** (PGS, VobSub) grabados en el vídeo: implementados,
+      nunca ejecutados con una pista real.
+- [ ] **HDR a SDR**: en el equipo de desarrollo (un i5 antiguo de 4 núcleos) y con la
+      build de FFmpeg de Windows va a un tercio del tiempo real.
+
+**Aún no implementado**
+
+- [ ] Aplicaciones móviles (Android, iOS) y de televisor (Android TV, tvOS, Tizen,
+      webOS): fases 11 y 12 de [`plan_de_trabajo.md`](plan_de_trabajo.md).
+- [ ] Descubrimiento mDNS de MediaNode y el certificado generado para la LAN.
+- [ ] Instaladores (MSI, DEB, RPM, PKG), servicio de Windows y versiones firmadas;
+      el flujo de publicación nunca se ha ejecutado con una etiqueta.
+- [ ] Copias de seguridad y ajustes editables desde el panel (hoy son de solo
+      lectura).
+- [ ] Remote Relay (solo si hay demanda).
+- [ ] DLNA: perfiles `DLNA.ORG_PN` (omitidos a propósito: uno equivocado hace que un
+      televisor estricto rechace el elemento), `X_MS_MediaReceiverRegistrar`
+      (Windows Media Player, Xbox) y `PrepareForConnection`.
+- [ ] Perfiles familiares, restricciones por edad en el catálogo, recomendaciones.
+
+Las decisiones detrás del código están en [`docs/adr/`](docs/adr).
 
 ## Instalación
 
