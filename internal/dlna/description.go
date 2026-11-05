@@ -103,6 +103,13 @@ var cdsSCPD = scpd(
 			{"Result", "out", "A_ARG_TYPE_Result"}, {"NumberReturned", "out", "A_ARG_TYPE_Count"},
 			{"TotalMatches", "out", "A_ARG_TYPE_Count"}, {"UpdateID", "out", "A_ARG_TYPE_UpdateID"},
 		}},
+		{"Search", []arg{
+			{"ContainerID", "in", "A_ARG_TYPE_ObjectID"}, {"SearchCriteria", "in", "A_ARG_TYPE_SearchCriteria"},
+			{"Filter", "in", "A_ARG_TYPE_Filter"}, {"StartingIndex", "in", "A_ARG_TYPE_Index"},
+			{"RequestedCount", "in", "A_ARG_TYPE_Count"}, {"SortCriteria", "in", "A_ARG_TYPE_SortCriteria"},
+			{"Result", "out", "A_ARG_TYPE_Result"}, {"NumberReturned", "out", "A_ARG_TYPE_Count"},
+			{"TotalMatches", "out", "A_ARG_TYPE_Count"}, {"UpdateID", "out", "A_ARG_TYPE_UpdateID"},
+		}},
 	},
 	[]stateVar{
 		{"A_ARG_TYPE_ObjectID", "string", false, nil},
@@ -110,6 +117,7 @@ var cdsSCPD = scpd(
 		{"A_ARG_TYPE_BrowseFlag", "string", false, []string{"BrowseMetadata", "BrowseDirectChildren"}},
 		{"A_ARG_TYPE_Filter", "string", false, nil},
 		{"A_ARG_TYPE_SortCriteria", "string", false, nil},
+		{"A_ARG_TYPE_SearchCriteria", "string", false, nil},
 		{"A_ARG_TYPE_Index", "ui4", false, nil},
 		{"A_ARG_TYPE_Count", "ui4", false, nil},
 		{"A_ARG_TYPE_UpdateID", "ui4", false, nil},

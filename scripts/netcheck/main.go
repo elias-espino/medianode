@@ -375,6 +375,12 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 			return err
 		}
 	}
+	// Un subtítulo externo junto a la película directa (el escáner lo asocia por el nombre).
+	if data, err := os.ReadFile(filepath.Join(fixtures, "mp4_h264_aac.es.srt")); err == nil {
+		if err := os.WriteFile(filepath.Join(mediaDir, "Pelicula Directa.es.srt"), data, 0o644); err != nil {
+			return err
+		}
+	}
 	st, _, b := c.do("POST", "/api/v1/libraries", obj{"name": "Cine DLNA", "type": "movies", "paths": []string{mediaPath}}, token, via(lanIP))
 	if st != http.StatusCreated {
 		return fmt.Errorf("crear la biblioteca: %d %s", st, b)
@@ -478,7 +484,12 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 	st, body = browse("lib:"+lib, "BrowseDirectChildren")
 	unesc := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&amp;", "&", "&#34;", `"`).Replace(body)
 	reRes := regexp.MustCompile(`<res[^>]*protocolInfo="([^"]*)">([^<]*)</res>`)
-	ress := reRes.FindAllStringSubmatch(unesc, -1)
+	var ress [][]string
+	for _, r := range reRes.FindAllStringSubmatch(unesc, -1) {
+		if !strings.Contains(r[1], "text/srt") { // El subtítulo externo es otro <res>, no una película.
+			ress = append(ress, r)
+		}
+	}
 	c.check("D6", "Browse de la biblioteca da dos películas con su <res>", st == 200 && len(ress) == 2, len(ress))
 	var direct, ts string
 	for _, r := range ress {
@@ -537,6 +548,10 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 	}
 	c.check("D13", "las sesiones DLNA figuran en el panel, sin usuario", dl >= 1, dl)
 
+	c.searchAndSubtitles(root, browse, soap, get, lib, unesc)
+	events := c.subscribe(root, lu.Hostname())
+	defer events.close()
+
 	// Fuera de la red local, DLNA no existe.
 	for _, p := range []string{"/dlna/device.xml", "/dlna/cds.xml"} {
 		st, _, _ := c.do("GET", p, nil, "", via(publicIP))
@@ -556,6 +571,7 @@ func (c *checker) dlna(token, mediaDir, mediaPath, fixtures string, noMulticast 
 		st, _, _ := get(du.Path, nil)
 		c.check("D17", "y sus medios dejan de entregarse", st == 404, st)
 	}
+	events.expectChange(c)
 	return nil
 }
 

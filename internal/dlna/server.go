@@ -63,8 +63,10 @@ type Server struct {
 	// newIO abre el transporte SSDP; se sustituye en las pruebas.
 	newIO func(ctx context.Context, port int) (packetIO, error)
 
-	mu    sync.Mutex
-	flows map[string]string // IP|archivo → sesión.
+	mu         sync.Mutex
+	flows      map[string]string // IP|archivo → sesión.
+	hub        *hub
+	stopEvents context.CancelFunc
 }
 
 // New crea el servidor. transcoder puede ser nil.
@@ -77,7 +79,7 @@ func New(opts Options, db *database.DB, pb *playback.Service, sm *sessions.Manag
 	}
 	return &Server{
 		opts: opts, db: db, playback: pb, sessions: sm, transcoder: tm, net: netw, log: log,
-		flows: map[string]string{},
+		flows: map[string]string{}, hub: newHub(),
 		newIO: func(ctx context.Context, port int) (packetIO, error) { return newUDPIO(ctx, port) },
 	}
 }
@@ -104,6 +106,9 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	id := s.uuid
+	evCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	s.stopEvents = cancel
+	go s.eventLoop(evCtx) // Los eventos no dependen de que SSDP pueda abrir su puerto.
 	pio, err := s.newIO(ctx, s.opts.SSDPPort)
 	if err != nil {
 		s.log.Warn().Err(err).Int("puerto", s.opts.SSDPPort).
@@ -119,6 +124,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop avisa de que el servidor se va.
 func (s *Server) Stop(context.Context) error {
+	if s.stopEvents != nil {
+		s.stopEvents()
+	}
 	if s.ssdp != nil {
 		s.ssdp.stop()
 	}
@@ -181,13 +189,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /dlna/cds/control", s.control(cdsTypeURN, s.cdsActions()))
 	mux.HandleFunc("POST /dlna/cms/control", s.control(cmsTypeURN, s.cmsActions()))
 	for _, svc := range []string{"cds", "cms"} {
-		mux.HandleFunc("SUBSCRIBE /dlna/"+svc+"/event", s.subscribe)
+		mux.HandleFunc("SUBSCRIBE /dlna/"+svc+"/event", s.subscribe(svc))
 		mux.HandleFunc("UNSUBSCRIBE /dlna/"+svc+"/event", s.unsubscribe)
 	}
 	mux.HandleFunc("GET /dlna/media/{file}/{name}", s.serveDirect)
 	mux.HandleFunc("HEAD /dlna/media/{file}/{name}", s.serveDirect)
 	mux.HandleFunc("GET /dlna/ts/{file}/{name}", s.serveTS)
 	mux.HandleFunc("HEAD /dlna/ts/{file}/{name}", s.serveTS)
+	mux.HandleFunc("GET /dlna/sub/{name}", s.serveSubtitle)
+	mux.HandleFunc("HEAD /dlna/sub/{name}", s.serveSubtitle)
 	mux.HandleFunc("GET /dlna/art/{name}", s.serveArt)
 	mux.HandleFunc("HEAD /dlna/art/{name}", s.serveArt)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +250,7 @@ func (s *Server) control(service string, actions map[string]actionFunc) http.Han
 func (s *Server) cdsActions() map[string]actionFunc {
 	return map[string]actionFunc{
 		"GetSearchCapabilities": func(context.Context, *http.Request, map[string]string) ([]pair, *upnpError) {
-			return []pair{{"SearchCaps", ""}}, nil
+			return []pair{{"SearchCaps", searchCaps}}, nil
 		},
 		"GetSortCapabilities": func(context.Context, *http.Request, map[string]string) ([]pair, *upnpError) {
 			return []pair{{"SortCaps", "dc:title"}}, nil
@@ -249,6 +259,7 @@ func (s *Server) cdsActions() map[string]actionFunc {
 			return []pair{{"Id", strconv.FormatUint(uint64(s.updateID(ctx)), 10)}}, nil
 		},
 		"Browse": s.actionBrowse,
+		"Search": s.actionSearch,
 	}
 }
 
@@ -270,6 +281,26 @@ func (s *Server) actionBrowse(ctx context.Context, r *http.Request, a map[string
 		return nil, bad
 	}
 	res, uerr := s.browse(ctx, req)
+	if uerr != nil {
+		return nil, uerr
+	}
+	return []pair{
+		{"Result", res.didl}, {"NumberReturned", strconv.Itoa(res.returned)},
+		{"TotalMatches", strconv.FormatInt(res.total, 10)}, {"UpdateID", strconv.FormatUint(uint64(res.updateID), 10)},
+	}, nil
+}
+
+func (s *Server) actionSearch(ctx context.Context, r *http.Request, a map[string]string) ([]pair, *upnpError) {
+	bad := &upnpError{errInvalidArgs, "Invalid Args"}
+	req := searchRequest{containerID: a["ContainerID"], criteria: a["SearchCriteria"], host: s.hostOf(r), desc: parseSort(a["SortCriteria"])}
+	var ok1, ok2 bool
+	if req.start, ok1 = parseIndex(a["StartingIndex"], 0); !ok1 {
+		return nil, bad
+	}
+	if req.count, ok2 = parseIndex(a["RequestedCount"], 0); !ok2 {
+		return nil, bad
+	}
+	res, uerr := s.search(ctx, req)
 	if uerr != nil {
 		return nil, uerr
 	}
@@ -303,36 +334,6 @@ func (s *Server) cmsActions() map[string]actionFunc {
 			}, nil
 		},
 	}
-}
-
-// --- Eventos ---
-
-// subscribe acepta la suscripción (UDA 1.0 §4.1.1) pero no envía eventos: la
-// lista de bibliotecas cambia poco, y el cliente que quiera novedades vuelve a
-// navegar. No se llama a ninguna URL de CALLBACK: no hay nada que enviar, y
-// así un cliente no puede hacer que el servidor conecte a donde quiera.
-func (s *Server) subscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("SID") == "" && r.Header.Get("CALLBACK") == "" {
-		http.Error(w, "falta CALLBACK", http.StatusPreconditionFailed)
-		return
-	}
-	sid := r.Header.Get("SID")
-	if sid == "" {
-		sid = "uuid:" + uuid.NewString()
-	}
-	w.Header().Set("SID", sid)
-	w.Header().Set("TIMEOUT", "Second-"+strconv.Itoa(ssdpMaxAge))
-	w.Header().Set("Content-Length", "0")
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) unsubscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("SID") == "" {
-		http.Error(w, "falta SID", http.StatusPreconditionFailed)
-		return
-	}
-	w.Header().Set("Content-Length", "0")
-	w.WriteHeader(http.StatusOK)
 }
 
 // touchEvery es cada cuánto se renueva la actividad de una sesión mientras

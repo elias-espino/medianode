@@ -2254,8 +2254,10 @@ parametrizada y `images.Open` rechaza rutas que salen).
   propósito). El criterio exige tres de fabricantes distintos.
 - El acceso remoto cifrado **desde fuera de la LAN de verdad**.
 - macOS (SSDP no se ha ejecutado) y un Linux con multidifusión real entre equipos.
-- Eventos UPnP, `Search`, subtítulos externos por DLNA, `DLNA.ORG_PN`,
-  `X_MS_MediaReceiverRegistrar` (Windows Media Player y Xbox) y `PrepareForConnection`.
+- `DLNA.ORG_PN` (a propósito: sin ver qué acepta cada modelo, un perfil mal declarado
+  es peor que ninguno), `X_MS_MediaReceiverRegistrar` (Windows Media Player y Xbox) y
+  `PrepareForConnection`. Eventos UPnP, `Search` y subtítulos externos están
+  implementados y probados con un control point propio, **no con un televisor**.
 - Que el flujo en trozos (sin `Content-Length`) lo acepten todos los televisores.
 - El certificado generado para la LAN y mDNS (Fase 11) y Remote Relay (sin demanda).
 

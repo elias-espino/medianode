@@ -76,6 +76,7 @@ type env struct {
 	admin      *admin.Service
 	dataDir    string
 	dlna       *dlna.Server
+	lastFault  string // Cuerpo del último error SOAP de las pruebas de DLNA.
 }
 
 func newEnv(t *testing.T) *env {

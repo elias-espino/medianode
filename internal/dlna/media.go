@@ -149,6 +149,12 @@ func (s *Server) serveDirect(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", playback.DLNAMIME(container))
 	w.Header().Set("Accept-Ranges", "bytes")
 	dlnaHeaders(w, r, strings.TrimPrefix(protocolInfo("x", "01", false), "http-get:*:x:"))
+	// Los renderers de Samsung piden la dirección del subtítulo en una cabecera.
+	if r.Header.Get("getCaptionInfo.sec") == "1" {
+		if sub := s.pickSidecar(ctx, fileID); sub != nil {
+			w.Header().Set("CaptionInfo.sec", "http://"+s.hostOf(r)+"/dlna/sub/"+sub.ID+".srt")
+		}
+	}
 	var rs io.ReadSeeker = f
 	// Un HEAD no es una reproducción: los televisores lo usan para sondear.
 	if r.Method == http.MethodGet {

@@ -21,6 +21,7 @@ const dlnaFlags = "01700000000000000000000000000000"
 
 // resource es un <res>: una URL con sus atributos.
 type resource struct {
+	fileID       string // Solo en las entregas directas: de ahí salen los subtítulos externos.
 	url          string
 	protocolInfo string
 	size         int64 // 0: desconocido.
@@ -40,6 +41,7 @@ type object struct {
 	date              string
 	desc              string
 	art               string
+	caption           string // URL del subtítulo externo (sec:CaptionInfoEx).
 	res               []resource
 }
 
@@ -70,7 +72,8 @@ func didl(objs []object) string {
 	b.WriteString(`<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ` +
 		`xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
 		`xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
-		`xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">`)
+		`xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" ` +
+		`xmlns:sec="http://www.sec.co.kr/">`)
 	for _, o := range objs {
 		tag := "item"
 		if o.container {
@@ -108,8 +111,11 @@ func didl(objs []object) string {
 			}
 			b.WriteString(` protocolInfo="` + esc(r.protocolInfo) + `">` + esc(r.url) + `</res>`)
 		}
+		if o.caption != "" {
+			b.WriteString(`<sec:CaptionInfoEx sec:type="srt">` + esc(o.caption) + `</sec:CaptionInfoEx>`)
+		}
 		if o.art != "" {
-			b.WriteString(`<upnp:albumArtURI dlna:profileID="JPEG_TN">` + esc(o.art) + `</upnp:albumArtURI>`)
+			b.WriteString(`<upnp:albumArtURI>` + esc(o.art) + `</upnp:albumArtURI>`)
 		}
 		b.WriteString(`</` + tag + `>`)
 	}

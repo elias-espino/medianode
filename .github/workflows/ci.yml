@@ -91,7 +91,11 @@ jobs:
   # rangos y MPEG-TS) y un reverse proxy simulado que prueba el acceso remoto.
   netcheck:
     needs: web
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -101,11 +105,16 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - name: FFmpeg y vídeos de prueba
+      - name: FFmpeg
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          go run ./scripts/gen-fixtures
+      - name: FFmpeg
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+      - name: Vídeos de prueba
+        run: go run ./scripts/gen-fixtures
       - name: Servidor y comprobaciones de red
         run: |
           mkdir -p "$RUNNER_TEMP/net/config" "$RUNNER_TEMP/net/media"

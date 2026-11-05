@@ -45,7 +45,7 @@ func TestDescripcionDeLosServicios(t *testing.T) {
 		doc     []byte
 		actions []string
 	}{
-		"cds": {cdsSCPD, []string{"GetSearchCapabilities", "GetSortCapabilities", "GetSystemUpdateID", "Browse"}},
+		"cds": {cdsSCPD, []string{"GetSearchCapabilities", "GetSortCapabilities", "GetSystemUpdateID", "Browse", "Search"}},
 		"cms": {cmsSCPD, []string{"GetProtocolInfo", "GetCurrentConnectionIDs", "GetCurrentConnectionInfo"}},
 	} {
 		var doc struct {
@@ -517,32 +517,11 @@ func TestCapacidadesDeContentDirectory(t *testing.T) {
 	if w := control(h, "/dlna/cds/control", cdsTypeURN, "GetSortCapabilities", ""); !strings.Contains(w.Body.String(), "<SortCaps>dc:title</SortCaps>") {
 		t.Errorf("%s", w.Body)
 	}
-	if w := control(h, "/dlna/cds/control", cdsTypeURN, "GetSearchCapabilities", ""); !strings.Contains(w.Body.String(), "<SearchCaps></SearchCaps>") {
+	if w := control(h, "/dlna/cds/control", cdsTypeURN, "GetSearchCapabilities", ""); !strings.Contains(w.Body.String(), "<SearchCaps>dc:title,upnp:class</SearchCaps>") {
 		t.Errorf("%s", w.Body)
 	}
 	if w := control(h, "/dlna/cds/control", cdsTypeURN, "GetSystemUpdateID", ""); !strings.Contains(w.Body.String(), "<Id>") {
 		t.Errorf("%s", w.Body)
-	}
-}
-
-func TestSuscripcionesNoLlamanANadie(t *testing.T) {
-	_, h := newServer(t, "x")
-	w := doReq(h, "SUBSCRIBE", "/dlna/cds/event", "", lanAddr, "CALLBACK", "<http://169.254.169.254/latest>", "NT", "upnp:event", "TIMEOUT", "Second-300")
-	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("SID"), "uuid:") || w.Header().Get("TIMEOUT") != "Second-1800" {
-		t.Fatalf("%d %v", w.Code, w.Header())
-	}
-	// Renovar.
-	if w2 := doReq(h, "SUBSCRIBE", "/dlna/cds/event", "", lanAddr, "SID", w.Header().Get("SID")); w2.Code != 200 || w2.Header().Get("SID") != w.Header().Get("SID") {
-		t.Fatalf("renovar: %d %v", w2.Code, w2.Header())
-	}
-	if w := doReq(h, "SUBSCRIBE", "/dlna/cms/event", "", lanAddr); w.Code != http.StatusPreconditionFailed {
-		t.Errorf("sin CALLBACK ni SID: %d", w.Code)
-	}
-	if w := doReq(h, "UNSUBSCRIBE", "/dlna/cms/event", "", lanAddr, "SID", "uuid:x"); w.Code != 200 {
-		t.Errorf("UNSUBSCRIBE: %d", w.Code)
-	}
-	if w := doReq(h, "UNSUBSCRIBE", "/dlna/cms/event", "", lanAddr); w.Code != http.StatusPreconditionFailed {
-		t.Errorf("UNSUBSCRIBE sin SID: %d", w.Code)
 	}
 }
 

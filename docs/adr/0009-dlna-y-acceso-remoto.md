@@ -116,8 +116,8 @@ es un `404`, como si no existiera, aunque el acceso remoto esté abierto.
 
 - Descripción del dispositivo: `MediaServer:1` con `DMS-1.50`, `UDN` persistente
   (`server_settings`), `ContentDirectory:1` y `ConnectionManager:1`.
-- `Browse`, `GetSearchCapabilities` (vacía), `GetSortCapabilities` (`dc:title`),
-  `GetSystemUpdateID`; `GetProtocolInfo`, `GetCurrentConnectionIDs` y
+- `Browse`, `Search`, `GetSearchCapabilities` (`dc:title,upnp:class`),
+  `GetSortCapabilities` (`dc:title`), `GetSystemUpdateID`; `GetProtocolInfo`, `GetCurrentConnectionIDs` y
   `GetCurrentConnectionInfo`. Errores UPnP con su código (401, 402, 501, 701, 706,
   710). El cuerpo SOAP se lee con el decodificador de Go, sin entidades externas,
   hasta 64 KiB y solo el primer elemento y sus hijos directos.
@@ -166,10 +166,29 @@ es un `404`, como si no existiera, aunque el acceso remoto esté abierto.
   respuesta abierta: un televisor en pausa deja de leer y no debe perder la sesión.
   Si el administrador la cierra mientras el televisor está en pausa (la escritura
   está bloqueada), un plazo de escritura vencido libera la petición.
-- **Eventos** (`SUBSCRIBE`): se acepta la suscripción con un `SID`, pero **no se envían
-  eventos** y no se llama nunca a la URL de `CALLBACK`: el cliente que quiera
-  novedades vuelve a navegar, y nadie puede hacer que el servidor conecte adonde
-  quiera.
+- **`Search`**: la gramática de ContentDirectory (`and`, `or`, paréntesis, `=`, `!=`,
+  `<`, `<=`, `>`, `>=`, `contains`, `doesNotContain`, `derivedfrom`, `exists`) sobre
+  `dc:title` y `upnp:class`, dentro de la raíz, una biblioteca, una serie o una
+  temporada. Se evalúa en memoria sobre las películas y episodios publicados (hasta
+  5000: es una biblioteca doméstica). Una propiedad que no se admite, o un criterio
+  mal formado o con más de 16 niveles de paréntesis, es el error UPnP 708.
+- **Eventos** (`SUBSCRIBE`): la suscripción de verdad. Estado inicial tras la respuesta
+  (SEQ 0) y un aviso con el nuevo `SystemUpdateID` cuando cambia el catálogo (se mira
+  cada 5 s); ConnectionManager envía solo el inicial. **El `CALLBACK` solo se acepta si
+  es una URL `http` con la IP literal de quien suscribe**: el servidor no conecta a
+  otro equipo por orden de un cliente, ni sigue redirecciones. Un máximo de 64
+  suscripciones, 8 por cliente y 4 callbacks por suscripción; se renuevan con `SID`
+  y caducan; tres fallos seguidos la dan por muerta.
+- **Subtítulos externos**: una película que se entrega tal cual anuncia su SRT
+  externo (el del idioma preferido; si no, el marcado por defecto; si no, el primero)
+  como un segundo `<res>` `text/srt` y con `sec:CaptionInfoEx` (Samsung), y responde
+  `CaptionInfo.sec` a quien lo pide. Solo SRT (es lo que leen los televisores); ASS y
+  WebVTT no se anuncian. En MPEG-TS no se anuncia: va grabado, si lo hay.
+- **Sin `DLNA.ORG_PN`, a propósito**: un perfil mal declarado hace que un televisor
+  estricto rechace el elemento, y los perfiles AVC dependen del nivel, el tamaño y
+  la tasa de cuadros, que solo se pueden afinar viendo qué acepta cada modelo. Hasta
+  entonces tampoco se declara `JPEG_TN` en las carátulas (se hizo al principio, y es un
+  perfil de 160×160).
 
 ### Un defecto de la Fase 9, encontrado al probar DLNA
 
@@ -221,10 +240,12 @@ original.
 - Acceso remoto cifrado **desde fuera de la LAN de verdad**: se simuló con un proxy
   de confianza y con la prueba de alcance; no se probó con un dominio, un puerto
   reenviado y un teléfono con datos móviles.
-- Eventos UPnP, `Search`, subtítulos externos por DLNA (`sec:CaptionInfoEx`),
-  `DLNA.ORG_PN`, `PrepareForConnection` y `X_MS_MediaReceiverRegistrar` (Windows Media
-  Player y Xbox lo piden).
-- macOS: SSDP no se ha ejecutado. Linux: solo en el CI y en Alpine, sin multidifusión
-  real entre equipos.
+- `DLNA.ORG_PN` (a propósito: ver arriba), `PrepareForConnection` y
+  `X_MS_MediaReceiverRegistrar` (Windows Media Player y Xbox lo piden). Los eventos, `Search`
+  y los subtítulos externos están probados con un control point propio, **no con un
+  televisor**: cada fabricante los lee a su manera.
+- macOS: el CI ejecuta `scripts/netcheck` en macOS; si ese trabajo no encuentra el
+  servidor por multidifusión, lo marca como omitido, no como correcto. Linux: solo en el CI y
+  en Alpine, sin multidifusión real entre equipos.
 - Remote Relay (§14.3): no se diseña hasta que haya demanda (§26.5).
 - El certificado propio generado para la LAN y mDNS siguen en la Fase 11.

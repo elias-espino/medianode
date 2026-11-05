@@ -391,3 +391,75 @@ func (q *Queries) ListDLNALibraryItemsDesc(ctx context.Context, arg ListDLNALibr
 	}
 	return items, nil
 }
+
+const listDLNASearchCandidates = `-- name: ListDLNASearchCandidates :many
+SELECT mi.id, mi.library_id, mi.parent_id, mi.type, mi.title, mi.year, mi.overview,
+       mi.release_date, mi.duration_ms, mi.season_number, mi.episode_number, mi.age_rating,
+       lib.type AS library_type, p.parent_id AS grandparent_id
+FROM media_items mi
+JOIN libraries lib ON lib.id = mi.library_id
+LEFT JOIN media_items p ON p.id = mi.parent_id
+WHERE lib.enabled = 1 AND lib.dlna_enabled = 1
+  AND mi.type IN ('movie', 'episode')
+  AND EXISTS (
+        SELECT 1 FROM media_file_items l
+        JOIN media_files f ON f.id = l.media_file_id
+        WHERE l.media_item_id = mi.id AND f.missing_since IS NULL AND f.probe_status = 'done')
+ORDER BY mi.sort_title, mi.id
+LIMIT ?1
+`
+
+type ListDLNASearchCandidatesRow struct {
+	ID            string
+	LibraryID     string
+	ParentID      *string
+	Type          string
+	Title         string
+	Year          *int64
+	Overview      *string
+	ReleaseDate   *string
+	DurationMs    *int64
+	SeasonNumber  *int64
+	EpisodeNumber *int64
+	AgeRating     *string
+	LibraryType   string
+	GrandparentID *string
+}
+
+func (q *Queries) ListDLNASearchCandidates(ctx context.Context, maxRows int64) ([]ListDLNASearchCandidatesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDLNASearchCandidates, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDLNASearchCandidatesRow{}
+	for rows.Next() {
+		var i ListDLNASearchCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.ParentID,
+			&i.Type,
+			&i.Title,
+			&i.Year,
+			&i.Overview,
+			&i.ReleaseDate,
+			&i.DurationMs,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.AgeRating,
+			&i.LibraryType,
+			&i.GrandparentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

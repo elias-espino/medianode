@@ -1854,8 +1854,9 @@ estéreo, hasta 1080p— lo admite; si no, MPEG-TS), `direct` o `transcode`. El
 MPEG-TS es un único FFmpeg que escribe en la respuesta, con salto por
 `TimeSeekRange.dlna.org`, subtítulos forzados grabados (`dlna.burn_subtitles`) y
 los mismos cupos que HLS. Los `protocolInfo` no llevan `DLNA.ORG_PN`: un perfil
-mal declarado hace que un televisor estricto rechace el elemento. No se envían
-eventos UPnP ni existe `Search`. Las sesiones DLNA caducan por
+mal declarado hace que un televisor estricto rechace el elemento. `Search` (títulos y clases), eventos UPnP
+(un aviso del `SystemUpdateID`, con `CALLBACK` solo hacia la IP de quien suscribe) y
+subtítulos SRT externos (`sec:CaptionInfoEx`) completan el servicio. Las sesiones DLNA caducan por
 `dlna.idle_timeout_seconds`, y se renuevan mientras haya una respuesta abierta.
 SSDP solo responde a direcciones locales de las redes del equipo. **No se ha
 probado con ningún televisor real** (`docs/dlna-renderers.md`).

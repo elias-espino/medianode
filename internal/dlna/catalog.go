@@ -253,6 +253,13 @@ func (s *Server) object(ctx context.Context, host string, row sqlc.GetDLNAItemRo
 		return nil, err
 	}
 	o.res = []resource{*res}
+	if res.fileID != "" {
+		if sub := s.pickSidecar(ctx, res.fileID); sub != nil {
+			u := "http://" + host + "/dlna/sub/" + sub.ID + ".srt"
+			o.caption = u
+			o.res = append(o.res, resource{url: u, protocolInfo: "http-get:*:text/srt:*"})
+		}
+	}
 	return o, nil
 }
 
@@ -296,6 +303,7 @@ func (s *Server) resourceFor(ctx context.Context, host string, row sqlc.GetDLNAI
 			res.url = "http://" + host + "/dlna/media/" + f.ID + "/" + fileSlug(row.Title, ext)
 			res.protocolInfo = protocolInfo(playback.DLNAMIME(plan.Container), "01", false)
 			res.size = deref(f.FileSize)
+			res.fileID = f.ID
 			res.bitrate = deref(f.Bitrate) / 8
 		} else {
 			res.url = "http://" + host + "/dlna/ts/" + f.ID + "/" + fileSlug(row.Title, "ts")

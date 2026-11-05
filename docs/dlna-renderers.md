@@ -53,11 +53,15 @@ reproduce; «Salto», que avanzar y retroceder funciona.
 
 ## Limitaciones conocidas de esta versión
 
-- No se envían **eventos UPnP**: un televisor que ya tiene abierta la lista no ve
-  cambios hasta que vuelve a navegar. Se acepta `SUBSCRIBE` pero no se notifica.
-- Sin **`Search`**: un renderer que solo busca (y no navega) no encuentra nada.
-- Sin **subtítulos externos** por DLNA (`sec:CaptionInfoEx` de Samsung y similares):
-  solo grabados en la imagen al recodificar.
+- **Eventos UPnP**: el cambio de catálogo se avisa cada 5 s a quien se suscribió, pero
+  el `CALLBACK` solo se acepta hacia la IP de quien suscribe (un televisor detrás de un
+  puente o con otra interfaz de red para eventos no recibirá avisos). No se probó con
+  un televisor.
+- **`Search`**: solo `dc:title` y `upnp:class`; un renderer que busque por otra propiedad
+  (`upnp:artist`, `dc:date`) recibe el error 708.
+- **Subtítulos externos**: solo SRT, con `sec:CaptionInfoEx` (Samsung) y un `<res>`
+  `text/srt`; no hay equivalente para LG o Sony más allá de ese `<res>`. En MPEG-TS van
+  grabados.
 - Sin **`X_MS_MediaReceiverRegistrar`**, que piden Windows Media Player y Xbox.
 - El flujo MPEG-TS va en trozos (HTTP/1.1 sin `Content-Length`) y solo admite saltar
   por tiempo, no por bytes.
