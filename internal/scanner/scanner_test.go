@@ -959,3 +959,47 @@ func (f *fixture) exec(query string, args ...any) {
 		f.t.Fatal(err)
 	}
 }
+
+// Una temporada nueva deja los datos de la serie incompletos: vuelve a la cola
+// de metadatos, salvo que el administrador los haya bloqueado.
+func TestTemporadaNuevaReencolaLaSerie(t *testing.T) {
+	f := newFixture(t)
+	root := t.TempDir()
+	write(t, root, "Mr Robot (2015)/S01/Mr Robot - S01E01.mkv", 100)
+	lib, _ := f.library(media.LibraryTV, root)
+	f.scan(lib)
+	var series string
+	if err := f.db.Read.QueryRowContext(f.ctx, "SELECT id FROM media_items WHERE type = 'series'").Scan(&series); err != nil {
+		t.Fatal(err)
+	}
+	pending := func() int {
+		return f.count("SELECT COUNT(*) FROM media_items WHERE id = ? AND metadata_status = 'pending'", series)
+	}
+	setStatus := func(s media.MetadataStatus) {
+		if err := f.db.Q.SetMetadataStatus(f.ctx, sqlc.SetMetadataStatusParams{ID: series, MetadataStatus: string(s), UpdatedAt: database.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	setStatus(media.MetadataDone)
+	f.scan(lib)
+	if pending() != 0 {
+		t.Fatal("un reescaneo sin novedades no reencola la serie")
+	}
+
+	write(t, root, "Mr Robot (2015)/S02/Mr Robot - S02E01-E02.mkv", 100)
+	f.scan(lib)
+	if pending() != 1 {
+		t.Fatal("la temporada nueva reencola la serie")
+	}
+
+	setStatus(media.MetadataDone)
+	if err := f.db.Q.SetMetadataLocked(f.ctx, sqlc.SetMetadataLockedParams{ID: series, MetadataLocked: 1, UpdatedAt: database.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "Mr Robot (2015)/S02/Mr Robot - S02E03.mkv", 100)
+	f.scan(lib)
+	if pending() != 0 {
+		t.Fatal("una serie bloqueada no se reencola")
+	}
+}

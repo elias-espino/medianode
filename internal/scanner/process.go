@@ -565,8 +565,12 @@ func identifyTx(ctx context.Context, q *sqlc.Queries, libType media.LibraryType,
 	if err != nil {
 		return err
 	}
+	// Una temporada o un episodio nuevo deja los datos de la serie incompletos:
+	// se piden de nuevo al proveedor, con el identificador ya conocido.
+	grew := false
 	season, err := q.GetSeason(ctx, sqlc.GetSeasonParams{ParentID: &series, SeasonNumber: &g.Season})
 	if errors.Is(err, sql.ErrNoRows) {
+		grew = true
 		season, err = createItem(ctx, q, sqlc.CreateMediaItemParams{
 			LibraryID: libraryID, ParentID: &series, Type: string(media.ItemSeason),
 			Title: fmt.Sprintf("Temporada %d", g.Season), SeasonNumber: &g.Season, CreatedAt: now,
@@ -582,6 +586,7 @@ func identifyTx(ctx context.Context, q *sqlc.Queries, libType media.LibraryType,
 	for i, n := range g.Episodes {
 		ep, err := q.GetEpisode(ctx, sqlc.GetEpisodeParams{ParentID: &season, EpisodeNumber: &n})
 		if errors.Is(err, sql.ErrNoRows) {
+			grew = true
 			title := fmt.Sprintf("Episodio %d", n)
 			if g.Title != "" {
 				title = g.Title
@@ -598,6 +603,9 @@ func identifyTx(ctx context.Context, q *sqlc.Queries, libType media.LibraryType,
 		if err := link(ctx, q, fileID, ep, int64(i), duration); err != nil {
 			return err
 		}
+	}
+	if grew {
+		return q.RequeueSeriesMetadata(ctx, sqlc.RequeueSeriesMetadataParams{ID: series, UpdatedAt: now})
 	}
 	return nil
 }

@@ -484,6 +484,21 @@ func (q *Queries) ListStaleMetadata(ctx context.Context, arg ListStaleMetadataPa
 	return items, nil
 }
 
+const requeueSeriesMetadata = `-- name: RequeueSeriesMetadata :exec
+UPDATE media_items SET metadata_status = 'pending', updated_at = ?2
+WHERE id = ?1 AND metadata_status = 'done' AND metadata_locked = 0
+`
+
+type RequeueSeriesMetadataParams struct {
+	ID        string
+	UpdatedAt string
+}
+
+func (q *Queries) RequeueSeriesMetadata(ctx context.Context, arg RequeueSeriesMetadataParams) error {
+	_, err := q.db.ExecContext(ctx, requeueSeriesMetadata, arg.ID, arg.UpdatedAt)
+	return err
+}
+
 const setExternalID = `-- name: SetExternalID :exec
 INSERT INTO media_external_ids (media_item_id, provider, external_id)
 VALUES (?1, ?2, ?3)

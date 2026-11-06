@@ -137,3 +137,7 @@ WHERE media_item_id = ?1
 SELECT id, season_number, episode_number FROM media_items
 WHERE parent_id = ?1
 ORDER BY season_number, episode_number;
+
+-- name: RequeueSeriesMetadata :exec
+UPDATE media_items SET metadata_status = 'pending', updated_at = ?2
+WHERE id = ?1 AND metadata_status = 'done' AND metadata_locked = 0;
