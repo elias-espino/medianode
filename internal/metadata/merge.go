@@ -92,3 +92,31 @@ func mergeSameSeries(ctx context.Context, q *sqlc.Queries, provider, externalID,
 	}
 	return true, nil
 }
+
+// mergeDuplicates une las series que ya comparten identificador: las creadas
+// antes de que el enriquecedor supiera unirlas, o las que el administrador
+// identificó a mano con el mismo.
+func (e *Enricher) mergeDuplicates(ctx context.Context) error {
+	rows, err := e.db.R.ListDuplicateSeries(ctx, e.provider.Name())
+	if err != nil {
+		return fmt.Errorf("buscar series duplicadas: %w", err)
+	}
+	merged := false
+	for _, r := range rows {
+		err := e.db.InTx(ctx, func(q *sqlc.Queries) error {
+			ok, err := mergeSameSeries(ctx, q, e.provider.Name(), r.ExternalID, r.ID)
+			merged = merged || ok
+			return err
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			continue // Ya se unió con otra de su grupo.
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if merged {
+		e.Notify()
+	}
+	return nil
+}

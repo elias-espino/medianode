@@ -230,6 +230,9 @@ func pauses(err error) bool {
 // tanda: así el bucle siempre avanza.
 func (e *Enricher) drain(ctx context.Context) error {
 	if e.provider != nil {
+		if err := e.mergeDuplicates(ctx); err != nil {
+			return err
+		}
 		for {
 			rows, err := e.db.R.ListPendingMetadata(ctx, pendingBatch)
 			if err != nil {

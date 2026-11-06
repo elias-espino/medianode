@@ -703,3 +703,34 @@ func TestSeriesConElMismoIdentificadorSeUnen(t *testing.T) {
 		}
 	}
 }
+
+// Las series que ya comparten identificador (de antes de que se supiera
+// unirlas) se unen sin tener que refrescar ninguna.
+func TestSeriesDuplicadasYaIdentificadasSeUnenAlArrancar(t *testing.T) {
+	f := newFixture(t)
+	a := f.item(nil, media.ItemSeries, "Mr. Robot", i64(2015), nil)
+	sa := f.item(&a, media.ItemSeason, "Temporada 1", nil, i64(1))
+	f.item(&sa, media.ItemEpisode, "Episodio 1", nil, i64(1))
+	b := f.item(nil, media.ItemSeries, "Mr. Robot", i64(2015), nil)
+	sb := f.item(&b, media.ItemSeason, "Temporada 2", nil, i64(2))
+	f.item(&sb, media.ItemEpisode, "Episodio 1", nil, i64(1))
+	f.exec("UPDATE media_items SET created_at = '2026-01-01T00:00:00.000Z', match_key = 'a', metadata_status = 'done' WHERE id = ?", a)
+	f.exec("UPDATE media_items SET match_key = 'b', metadata_status = 'done' WHERE id = ?", b)
+	f.exec("INSERT INTO media_external_ids (media_item_id, provider, external_id) VALUES (?, 'fake', '62560'), (?, 'fake', '62560')", a, b)
+	f.p.details["62560"] = &Details{ExternalID: "62560", Title: "Mr. Robot", Year: i64(2015)}
+	f.p.seasons[1] = &Season{Number: 1, Title: "T1", Episodes: []Episode{{Number: 1, Title: "uno"}}}
+	f.p.seasons[2] = &Season{Number: 2, Title: "T2", Episodes: []Episode{{Number: 1, Title: "dos"}}}
+
+	if err := f.e.drain(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var series, seasons int
+	_ = f.db.Read.QueryRow("SELECT COUNT(*) FROM media_items WHERE type = 'series'").Scan(&series)
+	_ = f.db.Read.QueryRow("SELECT COUNT(*) FROM media_items WHERE parent_id = ? AND type = 'season'", a).Scan(&seasons)
+	if series != 1 || seasons != 2 {
+		t.Fatalf("series=%d temporadas=%d: una serie con las dos temporadas", series, seasons)
+	}
+	if f.get(sb).Title != "T2" {
+		t.Fatalf("la temporada movida recibe sus datos: %+v", f.get(sb))
+	}
+}

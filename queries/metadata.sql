@@ -162,3 +162,15 @@ DELETE FROM media_items WHERE id = ?1;
 
 -- name: SetMatchKey :exec
 UPDATE OR IGNORE media_items SET match_key = ?2 WHERE id = ?1;
+
+-- name: ListDuplicateSeries :many
+SELECT m.id, x.external_id
+FROM media_items m
+JOIN media_external_ids x ON x.media_item_id = m.id AND x.provider = ?1
+WHERE m.type = 'series' AND m.parent_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM media_items o
+    JOIN media_external_ids ox ON ox.media_item_id = o.id AND ox.provider = x.provider
+    WHERE ox.external_id = x.external_id AND o.library_id = m.library_id
+      AND o.type = 'series' AND o.parent_id IS NULL AND o.id <> m.id)
+ORDER BY m.created_at, m.id;

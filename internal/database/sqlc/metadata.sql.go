@@ -348,6 +348,47 @@ func (q *Queries) ListChildNumbers(ctx context.Context, parentID *string) ([]Lis
 	return items, nil
 }
 
+const listDuplicateSeries = `-- name: ListDuplicateSeries :many
+SELECT m.id, x.external_id
+FROM media_items m
+JOIN media_external_ids x ON x.media_item_id = m.id AND x.provider = ?1
+WHERE m.type = 'series' AND m.parent_id IS NULL
+  AND EXISTS (
+    SELECT 1 FROM media_items o
+    JOIN media_external_ids ox ON ox.media_item_id = o.id AND ox.provider = x.provider
+    WHERE ox.external_id = x.external_id AND o.library_id = m.library_id
+      AND o.type = 'series' AND o.parent_id IS NULL AND o.id <> m.id)
+ORDER BY m.created_at, m.id
+`
+
+type ListDuplicateSeriesRow struct {
+	ID         string
+	ExternalID string
+}
+
+func (q *Queries) ListDuplicateSeries(ctx context.Context, provider string) ([]ListDuplicateSeriesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDuplicateSeries, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDuplicateSeriesRow{}
+	for rows.Next() {
+		var i ListDuplicateSeriesRow
+		if err := rows.Scan(&i.ID, &i.ExternalID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listImageLocalPaths = `-- name: ListImageLocalPaths :many
 SELECT local_path FROM media_images WHERE local_path IS NOT NULL
 `
