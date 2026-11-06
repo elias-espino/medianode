@@ -343,6 +343,9 @@ func (e *Enricher) fetchAndApply(ctx context.Context, itemID string, kind media.
 			}
 			seasons = append(seasons, s)
 		}
+		if seasons, err = e.withAbsoluteSeasons(ctx, d.ExternalID, local, seasons); err != nil {
+			return false, err
+		}
 	}
 	var applied bool
 	err = e.db.InTx(ctx, func(q *sqlc.Queries) error {
@@ -353,6 +356,48 @@ func (e *Enricher) fetchAndApply(ctx context.Context, itemID string, kind media.
 		e.Notify() // Hay imágenes que descargar.
 	}
 	return applied, err
+}
+
+// maxAbsoluteSeasons acota las temporadas que se piden para numerar en absoluto.
+const maxAbsoluteSeasons = 40
+
+// withAbsoluteSeasons trae el resto de temporadas del proveedor cuando la serie
+// local es una sola temporada con numeración corrida (anime: 1 a 95) y el
+// proveedor la reparte en varias. applySeasons las usa para colocar cada
+// episodio por su número absoluto.
+func (e *Enricher) withAbsoluteSeasons(ctx context.Context, seriesID string, local []sqlc.ListChildNumbersRow, seasons []*Season) ([]*Season, error) {
+	if len(local) != 1 || local[0].SeasonNumber == nil || *local[0].SeasonNumber != 1 {
+		return seasons, nil
+	}
+	eps, err := e.db.R.ListChildNumbers(ctx, &local[0].ID)
+	if err != nil {
+		return nil, fmt.Errorf("leer episodios: %w", err)
+	}
+	var maxLocal, maxRemote int64
+	for _, le := range eps {
+		if le.EpisodeNumber != nil && *le.EpisodeNumber > maxLocal {
+			maxLocal = *le.EpisodeNumber
+		}
+	}
+	for _, s := range seasons {
+		for _, ep := range s.Episodes {
+			maxRemote = max(maxRemote, ep.Number)
+		}
+	}
+	if maxLocal <= maxRemote {
+		return seasons, nil
+	}
+	for n := int64(2); n <= maxAbsoluteSeasons; n++ {
+		s, err := e.provider.Season(ctx, seriesID, n)
+		if errors.Is(err, ErrNotFound) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		seasons = append(seasons, s)
+	}
+	return seasons, nil
 }
 
 // requeueStale devuelve a la cola los elementos con metadatos más antiguos que

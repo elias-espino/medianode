@@ -1,10 +1,12 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -102,6 +104,9 @@ func applySeasons(ctx context.Context, q *sqlc.Queries, lang, seriesID string, s
 				continue
 			}
 			e, ok := episodes[*le.EpisodeNumber]
+			if !ok && len(local) == 1 && *ls.SeasonNumber == 1 {
+				e, ok = absoluteEpisode(seasons, *le.EpisodeNumber)
+			}
 			if !ok {
 				continue
 			}
@@ -114,6 +119,34 @@ func applySeasons(ctx context.Context, q *sqlc.Queries, lang, seriesID string, s
 		}
 	}
 	return nil
+}
+
+// absoluteEpisode busca el episodio n contando de corrido las temporadas del
+// proveedor en orden, sin los especiales (temporada 0). Sirve a las series
+// que en disco son una sola temporada numerada 1..N.
+func absoluteEpisode(seasons []*Season, n int64) (Episode, bool) {
+	ordered := slices.Clone(seasons)
+	slices.SortFunc(ordered, func(a, b *Season) int { return cmp.Compare(a.Number, b.Number) })
+	var offset int64
+	for _, s := range ordered {
+		if s.Number < 1 {
+			continue
+		}
+		var top int64
+		for _, e := range s.Episodes {
+			top = max(top, e.Number)
+		}
+		if n <= offset+top {
+			for _, e := range s.Episodes {
+				if e.Number == n-offset {
+					return e, true
+				}
+			}
+			return Episode{}, false
+		}
+		offset += top
+	}
+	return Episode{}, false
 }
 
 // applyChild guarda una temporada o un episodio. Su clasificación queda vacía

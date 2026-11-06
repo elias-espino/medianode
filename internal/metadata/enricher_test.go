@@ -734,3 +734,30 @@ func TestSeriesDuplicadasYaIdentificadasSeUnenAlArrancar(t *testing.T) {
 		t.Fatalf("la temporada movida recibe sus datos: %+v", f.get(sb))
 	}
 }
+
+// Un anime en disco es una sola temporada numerada 1..N, y TMDB lo reparte en
+// varias: los capítulos que pasan del final de la temporada 1 se buscan por su
+// número absoluto.
+func TestNumeracionAbsolutaEnUnaSolaTemporada(t *testing.T) {
+	f := newFixture(t)
+	series := f.item(nil, media.ItemSeries, "Kenshin", nil, nil)
+	season := f.item(&series, media.ItemSeason, "Temporada 1", nil, i64(1))
+	ids := map[int64]string{}
+	for _, n := range []int64{1, 3, 4, 6, 7} {
+		ids[n] = f.item(&season, media.ItemEpisode, "archivo", nil, i64(n))
+	}
+	f.p.matches["Kenshin"] = []Match{{ExternalID: "28136", Title: "Kenshin"}}
+	f.p.details["28136"] = &Details{ExternalID: "28136", Title: "Kenshin"}
+	f.p.seasons[1] = &Season{Number: 1, Episodes: []Episode{{Number: 1, Title: "uno"}, {Number: 2, Title: "dos"}, {Number: 3, Title: "tres"}}}
+	f.p.seasons[2] = &Season{Number: 2, Episodes: []Episode{{Number: 1, Title: "cuatro"}, {Number: 2, Title: "cinco"}, {Number: 3, Title: "seis"}}}
+
+	if err := f.e.drain(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]string{1: "uno", 3: "tres", 4: "cuatro", 6: "seis", 7: "archivo"}
+	for n, title := range want {
+		if got := f.get(ids[n]).Title; got != title {
+			t.Errorf("episodio %d: %q, se esperaba %q", n, got, title)
+		}
+	}
+}

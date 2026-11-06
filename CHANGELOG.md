@@ -9,6 +9,16 @@ bajo «Sin publicar». Lo que no se probó en hardware real se dice.
 
 **Corregido**
 
+- **Anime con numeración corrida.** Una serie que en disco es una sola temporada
+  numerada 1..N (Samurai X: 1 a 95) pero que TMDB reparte en varias (27, 35 y 32
+  capítulos) solo recibía metadatos de los primeros 27; el resto quedaba con el nombre
+  del archivo. Ahora, si la serie local es una única temporada 1 y tiene capítulos más
+  allá de los que TMDB da en su temporada 1, se piden las demás temporadas y cada
+  capítulo se coloca por su número absoluto (`internal/metadata`, con test). Solo
+  afecta a ese caso; con varias temporadas locales no se toca. Los capítulos que pasen
+  del total de TMDB (aquí el 95, TMDB suma 94) siguen sin datos. Comprobado con una
+  serie real tras pulsar «Actualizar».
+
 - **Reproducción en el navegador.** La política de seguridad del panel bloqueaba las URL
   `blob:` que usa hls.js, así que los vídeos que se remuxean o transcodifican no
   arrancaban. Se añaden `media-src 'self' blob:` y `worker-src 'self' blob:`
