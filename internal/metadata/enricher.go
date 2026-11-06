@@ -304,6 +304,19 @@ func (e *Enricher) settle(ctx context.Context, r sqlc.ListPendingMetadataRow, er
 // fetchAndApply pide los detalles, y las temporadas de una serie, y los guarda
 // en una transacción. Las peticiones van fuera de ella (§6.3).
 func (e *Enricher) fetchAndApply(ctx context.Context, itemID string, kind media.ItemType, externalID string) (bool, error) {
+	if kind == media.ItemSeries {
+		// Dos series con el mismo identificador son una: se unen y la que queda
+		// vuelve a la cola, que repetirá esto con todas sus temporadas.
+		var merged bool
+		err := e.db.InTx(ctx, func(q *sqlc.Queries) error {
+			var err error
+			merged, err = mergeSameSeries(ctx, q, e.provider.Name(), externalID, itemID)
+			return err
+		})
+		if err != nil || merged {
+			return merged, err
+		}
+	}
 	d, err := e.provider.Details(ctx, externalID, kind)
 	if err != nil {
 		return false, err

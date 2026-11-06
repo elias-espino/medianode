@@ -127,6 +127,15 @@ func (q *Queries) CreateGenre(ctx context.Context, arg CreateGenreParams) error 
 	return err
 }
 
+const deleteItemByID = `-- name: DeleteItemByID :exec
+DELETE FROM media_items WHERE id = ?1
+`
+
+func (q *Queries) DeleteItemByID(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteItemByID, id)
+	return err
+}
+
 const deleteItemExternalIDs = `-- name: DeleteItemExternalIDs :exec
 DELETE FROM media_external_ids WHERE media_item_id = ?1
 `
@@ -238,6 +247,43 @@ func (q *Queries) EditItemMetadata(ctx context.Context, arg EditItemMetadataPara
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const findSameExternalItem = `-- name: FindSameExternalItem :one
+SELECT m.id, m.created_at, m.match_key
+FROM media_items m
+JOIN media_external_ids x ON x.media_item_id = m.id
+WHERE x.provider = ?1 AND x.external_id = ?2 AND m.library_id = ?3 AND m.type = ?4
+  AND m.parent_id IS NULL AND m.id <> ?5
+ORDER BY m.created_at, m.id
+LIMIT 1
+`
+
+type FindSameExternalItemParams struct {
+	Provider   string
+	ExternalID string
+	LibraryID  string
+	Type       string
+	ID         string
+}
+
+type FindSameExternalItemRow struct {
+	ID        string
+	CreatedAt string
+	MatchKey  *string
+}
+
+func (q *Queries) FindSameExternalItem(ctx context.Context, arg FindSameExternalItemParams) (FindSameExternalItemRow, error) {
+	row := q.db.QueryRowContext(ctx, findSameExternalItem,
+		arg.Provider,
+		arg.ExternalID,
+		arg.LibraryID,
+		arg.Type,
+		arg.ID,
+	)
+	var i FindSameExternalItemRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.MatchKey)
+	return i, err
 }
 
 const getExternalID = `-- name: GetExternalID :one
@@ -484,6 +530,35 @@ func (q *Queries) ListStaleMetadata(ctx context.Context, arg ListStaleMetadataPa
 	return items, nil
 }
 
+const moveFileLinks = `-- name: MoveFileLinks :exec
+UPDATE OR IGNORE media_file_items SET media_item_id = ?2 WHERE media_item_id = ?1
+`
+
+type MoveFileLinksParams struct {
+	MediaItemID   string
+	MediaItemID_2 string
+}
+
+func (q *Queries) MoveFileLinks(ctx context.Context, arg MoveFileLinksParams) error {
+	_, err := q.db.ExecContext(ctx, moveFileLinks, arg.MediaItemID, arg.MediaItemID_2)
+	return err
+}
+
+const reparentItem = `-- name: ReparentItem :exec
+UPDATE media_items SET parent_id = ?2, updated_at = ?3 WHERE id = ?1
+`
+
+type ReparentItemParams struct {
+	ID        string
+	ParentID  *string
+	UpdatedAt string
+}
+
+func (q *Queries) ReparentItem(ctx context.Context, arg ReparentItemParams) error {
+	_, err := q.db.ExecContext(ctx, reparentItem, arg.ID, arg.ParentID, arg.UpdatedAt)
+	return err
+}
+
 const requeueSeriesMetadata = `-- name: RequeueSeriesMetadata :exec
 UPDATE media_items SET metadata_status = 'pending', updated_at = ?2
 WHERE id = ?1 AND metadata_status = 'done' AND metadata_locked = 0
@@ -539,6 +614,20 @@ func (q *Queries) SetImageLocalPath(ctx context.Context, arg SetImageLocalPathPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setMatchKey = `-- name: SetMatchKey :exec
+UPDATE OR IGNORE media_items SET match_key = ?2 WHERE id = ?1
+`
+
+type SetMatchKeyParams struct {
+	ID       string
+	MatchKey *string
+}
+
+func (q *Queries) SetMatchKey(ctx context.Context, arg SetMatchKeyParams) error {
+	_, err := q.db.ExecContext(ctx, setMatchKey, arg.ID, arg.MatchKey)
+	return err
 }
 
 const setMetadataLocked = `-- name: SetMetadataLocked :exec

@@ -645,3 +645,61 @@ func TestFillSortTitles(t *testing.T) {
 		t.Fatalf("%v", s)
 	}
 }
+
+// Dos carpetas con nombres distintos crean dos series; si el proveedor las
+// identifica como la misma, se unen en la más antigua con todas sus temporadas.
+func TestSeriesConElMismoIdentificadorSeUnen(t *testing.T) {
+	f := newFixture(t)
+	old := f.item(nil, media.ItemSeries, "Mr Robot", nil, nil)
+	s1 := f.item(&old, media.ItemSeason, "Temporada 1", nil, i64(1))
+	e1 := f.item(&s1, media.ItemEpisode, "Episodio 1", nil, i64(1))
+	e2 := f.item(&s1, media.ItemEpisode, "Episodio 2", nil, i64(2))
+	fresh := f.item(nil, media.ItemSeries, "Mr Robot", i64(2015), nil)
+	s2 := f.item(&fresh, media.ItemSeason, "Temporada 2", nil, i64(2))
+	e21 := f.item(&s2, media.ItemEpisode, "Episodio 1", nil, i64(1))
+	dupS1 := f.item(&fresh, media.ItemSeason, "Temporada 1", nil, i64(1))
+	dupE2 := f.item(&dupS1, media.ItemEpisode, "Episodio 2", nil, i64(2))
+	f.exec("UPDATE media_items SET created_at = '2026-01-01T00:00:00.000Z' WHERE id = ?", old)
+	f.exec("UPDATE media_items SET match_key = 'mr robot' WHERE id = ?", old)
+	f.exec("UPDATE media_items SET match_key = 'mr robot|2015' WHERE id = ?", fresh)
+
+	f.p.matches["Mr Robot"] = []Match{{ExternalID: "62560", Title: "Mr. Robot", Year: i64(2015)}}
+	f.p.details["62560"] = &Details{ExternalID: "62560", Title: "Mr. Robot", Year: i64(2015)}
+	f.p.seasons[1] = &Season{Number: 1, Title: "Temporada 1", Episodes: []Episode{{Number: 1, Title: "hellofriend"}, {Number: 2, Title: "ones-and-zer0es"}}}
+	f.p.seasons[2] = &Season{Number: 2, Title: "Temporada 2", Episodes: []Episode{{Number: 1, Title: "unm4sk"}}}
+
+	if err := f.e.drain(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string, args ...any) int {
+		var n int
+		if err := f.db.Read.QueryRowContext(f.ctx, q, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count("SELECT COUNT(*) FROM media_items WHERE type = 'series'") != 1 {
+		t.Fatal("queda una sola serie")
+	}
+	keeper := f.get(old)
+	if keeper.Title != "Mr. Robot" || keeper.MetadataStatus != "done" {
+		t.Fatalf("la más antigua se queda y se enriquece: %+v", keeper)
+	}
+	if keeper.MatchKey == nil || *keeper.MatchKey != "mr robot|2015" {
+		t.Fatalf("adopta la clave de la carpeta nueva: %v", keeper.MatchKey)
+	}
+	if count("SELECT COUNT(*) FROM media_items WHERE parent_id = ? AND type = 'season'", old) != 2 {
+		t.Fatal("tiene las temporadas 1 y 2")
+	}
+	if got := f.get(s2); got.ParentID == nil || *got.ParentID != old || f.get(e21).Title != "unm4sk" {
+		t.Fatalf("la temporada 2 pasa a la serie con sus datos: %+v", got)
+	}
+	if f.get(e1).Title != "hellofriend" || f.get(e2).Title != "ones-and-zer0es" {
+		t.Fatal("la temporada 1 también se completa")
+	}
+	for _, gone := range []string{fresh, dupS1, dupE2} {
+		if count("SELECT COUNT(*) FROM media_items WHERE id = ?", gone) != 0 {
+			t.Fatalf("%s debía desaparecer", gone)
+		}
+	}
+}

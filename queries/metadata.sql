@@ -141,3 +141,24 @@ ORDER BY season_number, episode_number;
 -- name: RequeueSeriesMetadata :exec
 UPDATE media_items SET metadata_status = 'pending', updated_at = ?2
 WHERE id = ?1 AND metadata_status = 'done' AND metadata_locked = 0;
+
+-- name: FindSameExternalItem :one
+SELECT m.id, m.created_at, m.match_key
+FROM media_items m
+JOIN media_external_ids x ON x.media_item_id = m.id
+WHERE x.provider = ?1 AND x.external_id = ?2 AND m.library_id = ?3 AND m.type = ?4
+  AND m.parent_id IS NULL AND m.id <> ?5
+ORDER BY m.created_at, m.id
+LIMIT 1;
+
+-- name: ReparentItem :exec
+UPDATE media_items SET parent_id = ?2, updated_at = ?3 WHERE id = ?1;
+
+-- name: MoveFileLinks :exec
+UPDATE OR IGNORE media_file_items SET media_item_id = ?2 WHERE media_item_id = ?1;
+
+-- name: DeleteItemByID :exec
+DELETE FROM media_items WHERE id = ?1;
+
+-- name: SetMatchKey :exec
+UPDATE OR IGNORE media_items SET match_key = ?2 WHERE id = ?1;
